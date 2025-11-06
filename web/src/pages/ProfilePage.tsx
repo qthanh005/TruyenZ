@@ -1,25 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/providers/AuthProvider';
-import { api, attachToken, endpoints } from '@/services/apiClient';
+import { mockBookmarks, mockHistory } from '@/shared/mocks';
 
 export default function ProfilePage() {
 	const { user } = useAuth();
 	const [bookmarks, setBookmarks] = useState<any[]>([]);
 	const [history, setHistory] = useState<any[]>([]);
 
-	useEffect(() => {
-		attachToken(user);
-		(async () => {
-			try {
-				const [{ data: b }, { data: h }] = await Promise.all([
-					api.get(endpoints.bookmarks()),
-					api.get(endpoints.history()),
-				]);
-				setBookmarks(b?.items || b || []);
-				setHistory(h?.items || h || []);
-			} catch {}
-		})();
-	}, [user]);
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setBookmarks(mockBookmarks);
+            setHistory(mockHistory);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [user]);
 
 	return (
 		<div className="space-y-6">

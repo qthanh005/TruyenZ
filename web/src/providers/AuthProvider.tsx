@@ -7,7 +7,7 @@ type AuthContextValue = {
 	user: User | null;
 	isAuthenticated: boolean;
 	isLoading: boolean;
-	login: (redirectTo?: string) => Promise<void>;
+    login: (redirectTo?: string, provider?: 'oauth2' | 'facebook') => Promise<void>;
 	logout: () => Promise<void>;
 };
 
@@ -52,10 +52,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		user,
 		isAuthenticated: Boolean(user && !user.expired),
 		isLoading,
-		login: async (redirectTo?: string) => {
-			await manager.clearStaleState();
-			await manager.signinRedirect({ state: { redirectTo } });
-		},
+        login: async (redirectTo?: string, provider?: 'oauth2' | 'facebook') => {
+            await manager.clearStaleState();
+            if (provider === 'facebook') {
+                await manager.signinRedirect({
+                    state: { redirectTo },
+                    // If using Keycloak or a brokered IdP, this hint selects Facebook IdP
+                    extraQueryParams: { kc_idp_hint: 'facebook' },
+                });
+            } else {
+                await manager.signinRedirect({ state: { redirectTo } });
+            }
+        },
 		logout: async () => {
 			await manager.signoutRedirect();
 		}

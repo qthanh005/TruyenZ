@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { api, endpoints } from '@/services/apiClient';
+import { getChapterContent } from '@/shared/mocks';
 
 type ContentBlock = { type: 'text' | 'image'; value: string };
 type Chapter = { id: string; name: string; index?: number; prevId?: string | null; nextId?: string | null; content?: ContentBlock[] };
@@ -10,17 +10,16 @@ export default function ChapterReaderPage() {
 	const [chapter, setChapter] = useState<Chapter | null>(null);
 	const [loading, setLoading] = useState(true);
 
-	useEffect(() => {
-		if (!storyId || !chapterId) return;
-		(async () => {
-			setLoading(true);
-			try {
-				const { data } = await api.get(endpoints.chapterContent(storyId, chapterId));
-				setChapter(data);
-			} catch {}
-			setLoading(false);
-		})();
-	}, [storyId, chapterId]);
+    useEffect(() => {
+        if (!storyId || !chapterId) return;
+        setLoading(true);
+        const timer = setTimeout(() => {
+            const data = getChapterContent(storyId, chapterId);
+            setChapter(data);
+            setLoading(false);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [storyId, chapterId]);
 
 	const content = useMemo(() => chapter?.content || [], [chapter]);
 

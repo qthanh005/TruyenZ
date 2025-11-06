@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, endpoints } from '@/services/apiClient';
+import { searchStories } from '@/shared/mocks';
 import { Search } from 'lucide-react';
 
 type Suggestion = { id: string; title: string; author?: string };
@@ -15,12 +15,12 @@ export function SearchBar({ onSelect }: { onSelect: (storyId: string) => void })
 			setSuggestions([]);
 			return;
 		}
-		const t = setTimeout(async () => {
+        const t = setTimeout(async () => {
 			setLoading(true);
-			try {
-				const { data } = await api.get(endpoints.stories(query));
-				setSuggestions((data?.items || data || []).slice(0, 8));
-			} catch {}
+            try {
+                const data = searchStories(query);
+                setSuggestions(data);
+            } catch {}
 			setLoading(false);
 		}, 250);
 		return () => clearTimeout(t);
