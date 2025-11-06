@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+	color-scheme: light dark;
+}
+
+/* Smooth scrollbar for reader */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: theme('colors.zinc.400') transparent;
+}
+
+.scrollbar::-webkit-scrollbar {
+	width: 8px;
+}
+.scrollbar::-webkit-scrollbar-thumb {
+	background: rgba(120, 120, 128, 0.5);
+	border-radius: 9999px;
+}
+
+
