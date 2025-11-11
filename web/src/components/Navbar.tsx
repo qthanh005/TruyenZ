@@ -1,24 +1,48 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTheme } from '@/providers/ThemeProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { SearchBar } from '@/components/SearchBar';
-import { Moon, Sun, LogIn, LogOut, User as UserIcon, BookOpen } from 'lucide-react';
+import { EmailLoginModal } from '@/components/EmailLoginModal';
+import { User } from 'oidc-client-ts';
+import { Moon, Sun, LogIn, LogOut, User as UserIcon, BookOpen, Home, Flame, Grid3x3, History, Trophy, Menu, X, Mail } from 'lucide-react';
 
 export function Navbar() {
 	const { current, theme, setTheme } = useTheme();
-    const { isAuthenticated, user, login, logout } = useAuth();
+    const { isAuthenticated, user, login, logout, refreshEmailUser } = useAuth();
 	const navigate = useNavigate();
+    const location = useLocation();
     const [openLoginMenu, setOpenLoginMenu] = useState(false);
+    const [openMobileMenu, setOpenMobileMenu] = useState(false);
+    const [openEmailLogin, setOpenEmailLogin] = useState(false);
     const loginBtnRef = useRef<HTMLButtonElement | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
+    const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+
+    const navItems = [
+        { path: '/', label: 'Trang chủ', icon: Home },
+        { path: '/hot', label: 'Truyện hot', icon: Flame },
+        { path: '/categories', label: 'Thể loại', icon: Grid3x3 },
+        { path: '/history', label: 'Lịch sử', icon: History },
+        { path: '/ranking', label: 'Xếp hạng', icon: Trophy },
+    ];
+
+    const isActive = (path: string) => {
+        if (path === '/') {
+            return location.pathname === '/';
+        }
+        return location.pathname.startsWith(path);
+    };
 
     const closeMenu = useCallback(() => setOpenLoginMenu(false), []);
+    const closeMobileMenu = useCallback(() => setOpenMobileMenu(false), []);
+    
     useEffect(() => {
         function onDocClick(e: MouseEvent) {
             const t = e.target as Node;
             if (menuRef.current && menuRef.current.contains(t)) return;
             if (loginBtnRef.current && loginBtnRef.current.contains(t)) return;
+            if (mobileMenuRef.current && mobileMenuRef.current.contains(t)) return;
             setOpenLoginMenu(false);
         }
         if (openLoginMenu) {
@@ -27,14 +51,53 @@ export function Navbar() {
         return () => document.removeEventListener('mousedown', onDocClick);
     }, [openLoginMenu]);
 
+    useEffect(() => {
+        function onDocClick(e: MouseEvent) {
+            const t = e.target as Node;
+            if (mobileMenuRef.current && mobileMenuRef.current.contains(t)) return;
+            setOpenMobileMenu(false);
+        }
+        if (openMobileMenu) {
+            document.addEventListener('mousedown', onDocClick);
+        }
+        return () => document.removeEventListener('mousedown', onDocClick);
+    }, [openMobileMenu]);
+
 	return (
 		<header className="sticky top-0 z-40 w-full border-b border-zinc-200/60 bg-white/70 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/70">
 			<div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4">
 				<Link to="/" className="flex items-center gap-2 font-semibold">
 					<BookOpen className="h-5 w-5 text-brand" />
-					<span>TruyệnZ</span>
+					<span className="hidden sm:inline">TruyệnZ</span>
 				</Link>
+				<nav className="hidden lg:flex items-center gap-1 ml-4">
+					{navItems.map((item) => {
+						const Icon = item.icon;
+						const active = isActive(item.path);
+						return (
+							<Link
+								key={item.path}
+								to={item.path}
+								className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+									active
+										? 'bg-brand/10 text-brand dark:bg-brand/20'
+										: 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-zinc-100'
+								}`}
+							>
+								<Icon className="h-4 w-4" />
+								<span>{item.label}</span>
+							</Link>
+						);
+					})}
+				</nav>
 				<div className="flex-1" />
+				<button
+					className="lg:hidden inline-flex items-center justify-center rounded-md p-2 text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900"
+					onClick={() => setOpenMobileMenu((v) => !v)}
+					aria-label="Toggle menu"
+				>
+					{openMobileMenu ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+				</button>
 				<div className="hidden md:block w-full max-w-lg">
 					<SearchBar onSelect={(storyId) => navigate(`/story/${storyId}`)} />
 				</div>
@@ -53,7 +116,11 @@ export function Navbar() {
 								onClick={() => navigate('/me')}
 							>
 								<UserIcon className="h-4 w-4" />
-								<span>{user?.profile?.name || user?.profile?.preferred_username || 'Tôi'}</span>
+								<span>
+									{user instanceof User
+										? user.profile?.name || user.profile?.preferred_username || 'Tôi'
+										: (user as any)?.name || (user as any)?.profile?.name || (user as any)?.email || 'Tôi'}
+								</span>
 							</button>
 							<button
 								className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-1.5 text-sm text-white hover:opacity-90"
@@ -78,9 +145,21 @@ export function Navbar() {
                             {openLoginMenu && (
                                 <div
                                     ref={menuRef}
-                                    className="absolute right-0 z-50 mt-2 w-60 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
+                                    className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
                                     role="menu"
                                 >
+                                    <button
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                                        onClick={() => {
+                                            closeMenu();
+                                            setOpenEmailLogin(true);
+                                        }}
+                                        role="menuitem"
+                                    >
+                                        <Mail className="h-5 w-5 text-zinc-600 dark:text-zinc-400" />
+                                        <span>Đăng nhập bằng tài khoản web</span>
+                                    </button>
+                                    <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                                     <button
                                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
                                         onClick={() => {
@@ -118,10 +197,46 @@ export function Navbar() {
                                     </button>
                                 </div>
                             )}
+                            <EmailLoginModal
+                                open={openEmailLogin}
+                                onClose={() => setOpenEmailLogin(false)}
+                                onSuccess={async () => {
+                                    await refreshEmailUser();
+                                    setOpenEmailLogin(false);
+                                }}
+                            />
                         </div>
                     )}
 				</div>
 			</div>
+			{openMobileMenu && (
+				<div
+					ref={mobileMenuRef}
+					className="lg:hidden border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+				>
+					<nav className="mx-auto max-w-7xl px-4 py-2 space-y-1">
+						{navItems.map((item) => {
+							const Icon = item.icon;
+							const active = isActive(item.path);
+							return (
+								<Link
+									key={item.path}
+									to={item.path}
+									onClick={closeMobileMenu}
+									className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+										active
+											? 'bg-brand/10 text-brand dark:bg-brand/20'
+											: 'text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-zinc-100'
+									}`}
+								>
+									<Icon className="h-4 w-4" />
+									<span>{item.label}</span>
+								</Link>
+							);
+						})}
+					</nav>
+				</div>
+			)}
 		</header>
 	);
 }

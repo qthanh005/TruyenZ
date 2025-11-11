@@ -7,6 +7,10 @@ import StoryDetailPage from '@/pages/StoryDetailPage';
 import ChapterReaderPage from '@/pages/ChapterReaderPage';
 import ProfilePage from '@/pages/ProfilePage';
 import OAuthCallbackPage from '@/pages/OAuthCallbackPage';
+import HotStoriesPage from '@/pages/HotStoriesPage';
+import CategoriesPage from '@/pages/CategoriesPage';
+import HistoryPage from '@/pages/HistoryPage';
+import RankingPage from '@/pages/RankingPage';
 
 function PrivateRoute({ children }: { children: JSX.Element }) {
 	const { isAuthenticated, isLoading } = useAuth();
@@ -23,6 +27,10 @@ export default function App() {
 					<main className="mx-auto max-w-7xl px-4 pb-12 pt-6">
 						<Routes>
 							<Route path="/" element={<HomePage />} />
+							<Route path="/hot" element={<HotStoriesPage />} />
+							<Route path="/categories" element={<CategoriesPage />} />
+							<Route path="/history" element={<HistoryPage />} />
+							<Route path="/ranking" element={<RankingPage />} />
 							<Route path="/story/:storyId" element={<StoryDetailPage />} />
 							<Route path="/story/:storyId/chapter/:chapterId" element={<ChapterReaderPage />} />
 							<Route path="/oauth/callback" element={<OAuthCallbackPage />} />

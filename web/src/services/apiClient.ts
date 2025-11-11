@@ -22,6 +22,10 @@ export function attachToken(user: User | null) {
 
 // Example endpoints mapping to microservices
 export const endpoints = {
+	// User Service - Auth
+	register: () => '/user/register',
+	login: () => '/user/login',
+	logout: () => '/user/logout',
 	// User Service
 	me: () => '/user/me',
 	profile: (userId: string) => `/user/${userId}`,
