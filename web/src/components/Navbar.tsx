@@ -50,11 +50,13 @@ export function Navbar() {
 	const isAdmin = useMemo(() => {
 		if (!user) return false;
 		const profile = (user as any)?.profile;
+		const userEmail = profile?.email || (user as any)?.email;
 		return (
+			(user as any)?.role === 'ADMIN' ||
 			(user as any)?.role === 'Admin' ||
+			profile?.role === 'ADMIN' ||
 			profile?.role === 'Admin' ||
-			profile?.email?.includes('admin') ||
-			(user as any)?.email?.includes?.('admin')
+			(userEmail && userEmail.toLowerCase() === 'thanhvanguyen90@gmail.com')
 		);
 	}, [user]);
 
@@ -264,11 +266,13 @@ export function Navbar() {
                                     if (storedUser) {
                                         try {
                                             const userData = JSON.parse(storedUser);
+                                            const userEmail = userData?.email || userData?.profile?.email;
                                             const isAdmin = 
-                                                userData?.email?.includes('admin') ||
+                                                userData?.role === 'ADMIN' ||
                                                 userData?.role === 'Admin' ||
-                                                userData?.profile?.email?.includes('admin') ||
-                                                userData?.profile?.role === 'Admin';
+                                                userData?.profile?.role === 'ADMIN' ||
+                                                userData?.profile?.role === 'Admin' ||
+                                                (userEmail && userEmail.toLowerCase() === 'thanhvanguyen90@gmail.com');
                                             if (isAdmin) {
                                                 navigate('/admin');
                                             }

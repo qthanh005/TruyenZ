@@ -1,11 +1,12 @@
 import { UserManager, WebStorageStateStore, User } from 'oidc-client-ts';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { oauthConfig } from '@/shared/config/env';
-import { api, attachToken } from '@/services/apiClient';
+import { api, attachToken, endpoints } from '@/services/apiClient';
 
 type EmailUser = {
 	id: string;
 	email: string;
+	username?: string;
 	name: string;
 	role?: string;
 	profile?: {
@@ -111,16 +112,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		if (!token) return;
 
 		try {
-			const response = await api.get('/user/me');
+			// Đảm bảo token được set trong header
+			api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+			const response = await api.get(endpoints.me());
 			if (response.data) {
+				const data = response.data;
 				const emailUser: EmailUser = {
-					id: response.data.id || response.data.userId,
-					email: response.data.email,
-					name: response.data.name || response.data.username,
+					id: String(data.id || data.userId || ''),
+					email: data.email,
+					username: data.username || data.email,
+					name: data.username || data.email,
+					role: data.role,
 					profile: {
-						name: response.data.name || response.data.username,
-						preferred_username: response.data.username || response.data.email,
-						email: response.data.email,
+						name: data.username || data.email,
+						preferred_username: data.username || data.email,
+						email: data.email,
+						role: data.role,
 					},
 				};
 				localStorage.setItem('user', JSON.stringify(emailUser));
@@ -128,6 +135,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			}
 		} catch (e) {
 			console.error('Failed to refresh user:', e);
+			// Nếu token không hợp lệ, xóa và clear user
+			localStorage.removeItem('auth_token');
+			localStorage.removeItem('refresh_token');
+			localStorage.removeItem('user');
+			delete api.defaults.headers.common['Authorization'];
+			setUser(null);
 		}
 	};
 

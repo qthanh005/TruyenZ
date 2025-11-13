@@ -1,6 +1,6 @@
 // Centralized environment-like config for frontend-only setup
 export const apiConfig = {
-	gatewayBaseUrl: import.meta.env.VITE_API_GATEWAY_URL || 'https://api.truyenz.example.com',
+	gatewayBaseUrl: import.meta.env.VITE_API_GATEWAY_URL || 'http://localhost:8081',
 };
 
 export const crawlerConfig = {

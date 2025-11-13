@@ -40,12 +40,8 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
     };
 
     const validateForm = () => {
-        if (!email || !password) {
-            setError('Vui lòng điền đầy đủ thông tin');
-            return false;
-        }
-        if (!email.includes('@')) {
-            setError('Email không hợp lệ');
+        if (!password) {
+            setError('Vui lòng nhập mật khẩu');
             return false;
         }
         if (password.length < 6) {
@@ -53,12 +49,29 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
             return false;
         }
         if (isSignUp) {
+            // Đăng ký: cần name (username) và password
             if (!name) {
                 setError('Vui lòng nhập tên của bạn');
                 return false;
             }
             if (password !== confirmPassword) {
                 setError('Mật khẩu xác nhận không khớp');
+                return false;
+            }
+            // Email là tùy chọn, nhưng nếu có thì phải hợp lệ
+            if (email && !email.includes('@')) {
+                setError('Email không hợp lệ');
+                return false;
+            }
+            // Chặn đăng ký với email admin
+            if (email && email.toLowerCase() === 'thanhvanguyen90@gmail.com') {
+                setError('Email này không thể được sử dụng để đăng ký');
+                return false;
+            }
+        } else {
+            // Đăng nhập: cần username/name hoặc email, và password
+            if (!name && !email) {
+                setError('Vui lòng nhập tên đăng nhập hoặc email');
                 return false;
             }
         }
@@ -75,8 +88,11 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
 
         setLoading(true);
         try {
-            // Check mock users first (for development/testing)
-            const mockUser = findMockUser(email, password);
+            // Check mock users first (for development/testing) - chỉ khi có email
+            let mockUser = null;
+            if (email) {
+                mockUser = findMockUser(email, password);
+            }
             
             if (mockUser) {
                 // Use mock data
@@ -87,7 +103,7 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
                 handleClose();
                 setLoading(false);
                 // Auto redirect to admin if admin user
-                if (mockUser.role === 'Admin' || mockUser.email.includes('admin')) {
+                if (mockUser.role === 'Admin' || (mockUser.email && mockUser.email.includes('admin'))) {
                     setTimeout(() => navigate('/admin'), 100);
                 }
                 return;
@@ -95,42 +111,104 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
 
             // If not mock user, try API
             if (isSignUp) {
-                // Đăng ký
+                // Đăng ký - email là tùy chọn
                 const response = await api.post(endpoints.register(), {
-                    email,
+                    name, // name sẽ được dùng làm username
+                    email: email || undefined, // Email tùy chọn
                     password,
-                    name,
                 });
                 
-                if (response.data) {
-                    // Sau khi đăng ký thành công, tự động đăng nhập
-                    const loginResponse = await api.post(endpoints.login(), {
-                        email,
-                        password,
-                    });
+                if (response.data?.token || response.data?.accessToken) {
+                    const token = response.data.token || response.data.accessToken;
+                    const userData = response.data.user;
                     
-                    if (loginResponse.data?.token) {
-                        localStorage.setItem('auth_token', loginResponse.data.token);
-                        localStorage.setItem('user', JSON.stringify(loginResponse.data.user));
-                        onSuccess();
-                        handleClose();
+                    localStorage.setItem('auth_token', token);
+                    if (response.data.refreshToken) {
+                        localStorage.setItem('refresh_token', response.data.refreshToken);
                     }
-                }
-            } else {
-                // Đăng nhập
-                const response = await api.post(endpoints.login(), {
-                    email,
-                    password,
-                });
-                
-                if (response.data?.token) {
-                    localStorage.setItem('auth_token', response.data.token);
-                    localStorage.setItem('user', JSON.stringify(response.data.user));
+                    
+                    // Format user data để tương thích với frontend
+                    const user = userData ? {
+                        id: String(userData.id || ''),
+                        email: userData.email || '',
+                        username: userData.username || userData.email || name,
+                        name: userData.username || userData.email || name,
+                        role: userData.role,
+                        profile: {
+                            name: userData.username || userData.email || name,
+                            preferred_username: userData.username || userData.email || name,
+                            email: userData.email || '',
+                            role: userData.role,
+                        },
+                    } : null;
+                    
+                    if (user) {
+                        localStorage.setItem('user', JSON.stringify(user));
+                    }
+                    
+                    // Set token trong API client
+                    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+                    
                     onSuccess();
                     handleClose();
+                    
                     // Auto redirect to admin if admin user
+                    const isAdmin = userData?.role === 'ADMIN' || 
+                                   userData?.role === 'Admin' ||
+                                   (userData?.email && userData.email.toLowerCase() === 'thanhvanguyen90@gmail.com');
+                    if (isAdmin) {
+                        setTimeout(() => navigate('/admin'), 100);
+                    }
+                } else {
+                    setError('Đăng ký thành công nhưng không nhận được token. Vui lòng thử đăng nhập.');
+                }
+            } else {
+                // Đăng nhập - có thể dùng username (name) hoặc email
+                const identifier = name || email;
+                const response = await api.post(endpoints.login(), {
+                    usernameOrEmail: identifier, // Username hoặc email
+                    password,
+                });
+                
+                if (response.data?.token || response.data?.accessToken) {
+                    const token = response.data.token || response.data.accessToken;
                     const userData = response.data.user;
-                    if (userData?.role === 'Admin' || userData?.email?.includes('admin') || userData?.profile?.role === 'Admin') {
+                    
+                    localStorage.setItem('auth_token', token);
+                    if (response.data.refreshToken) {
+                        localStorage.setItem('refresh_token', response.data.refreshToken);
+                    }
+                    
+                    // Format user data để tương thích với frontend
+                    const user = userData ? {
+                        id: String(userData.id || ''),
+                        email: userData.email || '',
+                        username: userData.username || userData.email || name,
+                        name: userData.username || userData.email || name,
+                        role: userData.role,
+                        profile: {
+                            name: userData.username || userData.email || name,
+                            preferred_username: userData.username || userData.email || name,
+                            email: userData.email || '',
+                            role: userData.role,
+                        },
+                    } : null;
+                    
+                    if (user) {
+                        localStorage.setItem('user', JSON.stringify(user));
+                    }
+                    
+                    // Set token trong API client
+                    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+                    
+                    onSuccess();
+                    handleClose();
+                    
+                    // Auto redirect to admin if admin user
+                    const isAdmin = userData?.role === 'ADMIN' || 
+                                   userData?.role === 'Admin' ||
+                                   (userData?.email && userData.email.toLowerCase() === 'thanhvanguyen90@gmail.com');
+                    if (isAdmin) {
                         setTimeout(() => navigate('/admin'), 100);
                     }
                 } else {
@@ -138,11 +216,18 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
                 }
             }
         } catch (err: any) {
-            // If API fails, check if it's a network error and suggest using mock account
-            if (!err.response && !findMockUser(email, password)) {
-                setError('Không thể kết nối đến server. Vui lòng sử dụng tài khoản mock: admin@truyenz.com / admin123');
+            // If API fails, check if it's a network error
+            if (!err.response) {
+                const errorMsg = err.code === 'ECONNREFUSED' || err.message?.includes('Network Error')
+                    ? 'Không thể kết nối đến server. Vui lòng kiểm tra:\n1. API Gateway đang chạy trên http://localhost:8081\n2. User Service đang chạy trên http://localhost:8882\n3. Hoặc sử dụng tài khoản mock: admin@truyenz.com / admin123'
+                    : 'Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng và thử lại.';
+                setError(errorMsg);
             } else {
-                const errorMessage = err.response?.data?.message || err.message || 'Có lỗi xảy ra. Vui lòng thử lại.';
+                // Server trả về lỗi
+                const errorMessage = err.response?.data?.message || 
+                                    err.response?.data?.error ||
+                                    err.message || 
+                                    'Có lỗi xảy ra. Vui lòng thử lại.';
                 setError(errorMessage);
             }
         } finally {
@@ -184,7 +269,7 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
                     {isSignUp && (
                         <div>
                             <label htmlFor="name" className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                                Tên của bạn
+                                Tên đăng nhập <span className="text-red-500">*</span>
                             </label>
                             <input
                                 id="name"
@@ -192,29 +277,60 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                                placeholder="Nhập tên của bạn"
+                                placeholder="Nhập tên đăng nhập"
                                 disabled={loading}
                             />
                         </div>
                     )}
 
-                    <div>
-                        <label htmlFor="email" className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                            Email
-                        </label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                            <input
-                                id="email"
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="w-full rounded-md border border-zinc-300 pl-10 pr-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                                placeholder="your@email.com"
-                                disabled={loading}
-                            />
+                    {isSignUp && (
+                        <div>
+                            <label htmlFor="email" className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                                Email <span className="text-zinc-400 text-xs">(tùy chọn)</span>
+                            </label>
+                            <div className="relative">
+                                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                <input
+                                    id="email"
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className="w-full rounded-md border border-zinc-300 pl-10 pr-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                                    placeholder="your@email.com (tùy chọn)"
+                                    disabled={loading}
+                                />
+                            </div>
                         </div>
-                    </div>
+                    )}
+
+                    {!isSignUp && (
+                        <div>
+                            <label htmlFor="loginIdentifier" className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                                Tên đăng nhập hoặc Email
+                            </label>
+                            <div className="relative">
+                                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                <input
+                                    id="loginIdentifier"
+                                    type="text"
+                                    value={name || email}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value.includes('@')) {
+                                            setEmail(value);
+                                            setName('');
+                                        } else {
+                                            setName(value);
+                                            setEmail('');
+                                        }
+                                    }}
+                                    className="w-full rounded-md border border-zinc-300 pl-10 pr-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                                    placeholder="Tên đăng nhập hoặc email"
+                                    disabled={loading}
+                                />
+                            </div>
+                        </div>
+                    )}
 
                     <div>
                         <label htmlFor="password" className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">

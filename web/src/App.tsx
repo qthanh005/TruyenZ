@@ -23,13 +23,16 @@ function AdminRoute({ children }: { children: JSX.Element }) {
 	const { isAuthenticated, isLoading, user } = useAuth();
 	if (isLoading) return <div className="p-6">Đang tải...</div>;
 	
-	// Check if user is admin (mock check - replace with actual role check from backend)
-	const isAdmin = isAuthenticated && (
-		user?.profile?.email?.includes('admin') || 
+	// Check if user is admin - chỉ user có email thanhvanguyen90@gmail.com hoặc role ADMIN/Admin
+	const isAdmin = isAuthenticated && user && (
+		(user as any)?.role === 'ADMIN' ||
 		(user as any)?.role === 'Admin' ||
-		user?.profile?.preferred_username?.includes('admin') ||
-		// Check if user object has role property directly
-		((user as any)?.profile as any)?.role === 'Admin'
+		user?.profile?.role === 'ADMIN' ||
+		user?.profile?.role === 'Admin' ||
+		((user as any)?.profile as any)?.role === 'ADMIN' ||
+		((user as any)?.profile as any)?.role === 'Admin' ||
+		(user?.profile?.email && user.profile.email.toLowerCase() === 'thanhvanguyen90@gmail.com') ||
+		((user as any)?.email && (user as any).email.toLowerCase() === 'thanhvanguyen90@gmail.com')
 	);
 	
 	return isAdmin ? children : <Navigate to="/" replace />;
