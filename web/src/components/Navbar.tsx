@@ -111,6 +111,22 @@ export function Navbar() {
 					</button>
 					{isAuthenticated ? (
 						<>
+							{(() => {
+								const isAdmin = 
+									user?.profile?.email?.includes('admin') ||
+									(user as any)?.role === 'Admin' ||
+									user?.profile?.preferred_username?.includes('admin') ||
+									((user as any)?.profile as any)?.role === 'Admin';
+								return isAdmin ? (
+									<button
+										className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+										onClick={() => navigate('/admin')}
+									>
+										<Grid3x3 className="h-4 w-4" />
+										<span className="hidden sm:inline">Quản lý</span>
+									</button>
+								) : null;
+							})()}
 							<button
 								className="inline-flex items-center gap-2 rounded-md border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
 								onClick={() => navigate('/me')}
@@ -203,6 +219,23 @@ export function Navbar() {
                                 onSuccess={async () => {
                                     await refreshEmailUser();
                                     setOpenEmailLogin(false);
+                                    // Check if user is admin and redirect to admin page
+                                    const storedUser = localStorage.getItem('user');
+                                    if (storedUser) {
+                                        try {
+                                            const userData = JSON.parse(storedUser);
+                                            const isAdmin = 
+                                                userData?.email?.includes('admin') ||
+                                                userData?.role === 'Admin' ||
+                                                userData?.profile?.email?.includes('admin') ||
+                                                userData?.profile?.role === 'Admin';
+                                            if (isAdmin) {
+                                                navigate('/admin');
+                                            }
+                                        } catch (e) {
+                                            // Ignore parse errors
+                                        }
+                                    }
                                 }}
                             />
                         </div>

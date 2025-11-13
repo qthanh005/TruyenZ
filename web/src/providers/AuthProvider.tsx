@@ -7,10 +7,12 @@ type EmailUser = {
 	id: string;
 	email: string;
 	name: string;
+	role?: string;
 	profile?: {
 		name: string;
 		preferred_username: string;
 		email: string;
+		role?: string;
 	};
 };
 

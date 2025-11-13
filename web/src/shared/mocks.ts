@@ -82,4 +82,52 @@ export function getComments(storyId: string, page = 1, pageSize = 5): { items: M
     return { items, total };
 }
 
+// Mock users for development/testing
+export type MockUser = {
+    id: string;
+    email: string;
+    name: string;
+    password: string;
+    role?: string;
+};
+
+export const mockUsers: MockUser[] = [
+    {
+        id: '1',
+        email: 'admin@truyenz.com',
+        name: 'Admin User',
+        password: 'admin123',
+        role: 'Admin',
+    },
+    {
+        id: '2',
+        email: 'user@truyenz.com',
+        name: 'Test User',
+        password: 'user123',
+    },
+];
+
+export function findMockUser(email: string, password: string): MockUser | null {
+    return mockUsers.find((u) => u.email === email && u.password === password) || null;
+}
+
+export function createMockUserResponse(user: MockUser) {
+    return {
+        token: `mock_token_${user.id}_${Date.now()}`,
+        user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            username: user.email.split('@')[0],
+            role: user.role, // Role at top level
+            profile: {
+                name: user.name,
+                preferred_username: user.email.split('@')[0],
+                email: user.email,
+                role: user.role, // Role also in profile for compatibility
+            },
+        },
+    };
+}
+
 

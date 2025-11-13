@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { X, LogIn, UserPlus, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { api, endpoints } from '@/services/apiClient';
+import { findMockUser, createMockUserResponse, mockUsers } from '@/shared/mocks';
 
 type EmailLoginModalProps = {
     open: boolean;
@@ -10,6 +12,7 @@ type EmailLoginModalProps = {
 };
 
 export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalProps) {
+    const navigate = useNavigate();
     const [isSignUp, setIsSignUp] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -72,6 +75,25 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
 
         setLoading(true);
         try {
+            // Check mock users first (for development/testing)
+            const mockUser = findMockUser(email, password);
+            
+            if (mockUser) {
+                // Use mock data
+                const mockResponse = createMockUserResponse(mockUser);
+                localStorage.setItem('auth_token', mockResponse.token);
+                localStorage.setItem('user', JSON.stringify(mockResponse.user));
+                onSuccess();
+                handleClose();
+                setLoading(false);
+                // Auto redirect to admin if admin user
+                if (mockUser.role === 'Admin' || mockUser.email.includes('admin')) {
+                    setTimeout(() => navigate('/admin'), 100);
+                }
+                return;
+            }
+
+            // If not mock user, try API
             if (isSignUp) {
                 // Đăng ký
                 const response = await api.post(endpoints.register(), {
@@ -106,13 +128,23 @@ export function EmailLoginModal({ open, onClose, onSuccess }: EmailLoginModalPro
                     localStorage.setItem('user', JSON.stringify(response.data.user));
                     onSuccess();
                     handleClose();
+                    // Auto redirect to admin if admin user
+                    const userData = response.data.user;
+                    if (userData?.role === 'Admin' || userData?.email?.includes('admin') || userData?.profile?.role === 'Admin') {
+                        setTimeout(() => navigate('/admin'), 100);
+                    }
                 } else {
                     setError('Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.');
                 }
             }
         } catch (err: any) {
-            const errorMessage = err.response?.data?.message || err.message || 'Có lỗi xảy ra. Vui lòng thử lại.';
-            setError(errorMessage);
+            // If API fails, check if it's a network error and suggest using mock account
+            if (!err.response && !findMockUser(email, password)) {
+                setError('Không thể kết nối đến server. Vui lòng sử dụng tài khoản mock: admin@truyenz.com / admin123');
+            } else {
+                const errorMessage = err.response?.data?.message || err.message || 'Có lỗi xảy ra. Vui lòng thử lại.';
+                setError(errorMessage);
+            }
         } finally {
             setLoading(false);
         }
