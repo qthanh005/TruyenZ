@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bookmark, Clock, Shield, Star, User as UserIcon } from 'lucide-react';
+import { Bookmark, Clock, Shield, Star, User as UserIcon, Wallet } from 'lucide-react';
 
 import { useAuth } from '@/providers/AuthProvider';
 import { mockBookmarks, mockHistory } from '@/shared/mocks';
+import { useWalletStore } from '@/shared/stores/walletStore';
 
 type BookmarkItem = {
 	id: string;
@@ -47,6 +48,8 @@ export default function ProfilePage() {
 	const { user } = useAuth();
 	const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
 	const [history, setHistory] = useState<HistoryItem[]>([]);
+	const balance = useWalletStore((state) => state.balance);
+	const openTopUp = useWalletStore((state) => state.open);
 
 	useEffect(() => {
 		const timer = setTimeout(() => {
@@ -119,8 +122,15 @@ export default function ProfilePage() {
 				theme: 'bg-violet-500/10 text-violet-500',
 				subtext: 'Vai trò hiện tại trên hệ thống',
 			},
+			{
+				label: 'Số dư ví',
+				value: new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(balance),
+				icon: Wallet,
+				theme: 'bg-rose-500/10 text-rose-500',
+				subtext: 'Dùng để mua truyện premium',
+			},
 		],
-		[bookmarks.length, history.length, role]
+		[bookmarks.length, history.length, role, balance]
 	);
 
 	const siteHighlights = [
@@ -178,6 +188,13 @@ export default function ProfilePage() {
 							</button>
 							<button className="rounded-full border border-white/60 px-5 py-2 text-sm font-medium text-white transition hover:bg-white/10 dark:border-zinc-700 dark:text-zinc-200">
 								Quản lý bảo mật
+							</button>
+							<button
+								className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-500/20 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-500/30"
+								onClick={() => openTopUp()}
+							>
+								<Wallet size={16} />
+								Nạp thêm tiền
 							</button>
 						</div>
 					</div>

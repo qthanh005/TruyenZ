@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Navbar } from '@/components/Navbar';
+import { TopUpModal } from '@/components/payments/TopUpModal';
 
 export function Layout({ children }: { children: React.ReactNode }) {
 	return (
@@ -36,6 +37,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 					</div>
 				</div>
 			</footer>
+			<TopUpModal />
 		</div>
 	);
 }

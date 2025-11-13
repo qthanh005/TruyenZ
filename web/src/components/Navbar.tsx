@@ -19,8 +19,10 @@ import {
 	History,
 	Trophy,
 	Layers,
+	Coins,
 	Mail,
 } from 'lucide-react';
+import { useWalletStore } from '@/shared/stores/walletStore';
 
 export function Navbar() {
 	const { current, theme, setTheme } = useTheme();
@@ -33,6 +35,17 @@ export function Navbar() {
 	const loginBtnRef = useRef<HTMLButtonElement | null>(null);
 	const menuRef = useRef<HTMLDivElement | null>(null);
 	const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+	const openTopUp = useWalletStore((state) => state.open);
+	const walletBalance = useWalletStore((state) => state.balance);
+	const formattedBalance = useMemo(
+		() =>
+			new Intl.NumberFormat('vi-VN', {
+				style: 'currency',
+				currency: 'VND',
+				maximumFractionDigits: 0,
+			}).format(walletBalance),
+		[walletBalance]
+	);
 
 	const isAdmin = useMemo(() => {
 		if (!user) return false;
@@ -146,6 +159,14 @@ export function Navbar() {
 					</button>
 					{isAuthenticated ? (
 						<>
+							<button
+								className="inline-flex items-center gap-2 rounded-md border border-brand/40 bg-brand/10 px-3 py-1.5 text-sm font-medium text-brand transition hover:-translate-y-0.5 hover:bg-brand/20"
+								onClick={() => openTopUp()}
+							>
+								<Coins className="h-4 w-4" />
+								<span>Nạp tiền</span>
+								<span className="hidden sm:inline text-xs font-semibold text-brand/80">{formattedBalance}</span>
+							</button>
 							<button
 								className="inline-flex items-center gap-2 rounded-md border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
 								onClick={() => navigate('/me')}
