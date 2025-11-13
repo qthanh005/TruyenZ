@@ -1,19 +1,28 @@
-export type MockStory = { id: string; title: string; author?: string; cover?: string; genres?: string[]; description?: string };
+export type MockStory = {
+    id: string;
+    title: string;
+    author?: string;
+    cover?: string;
+    genres?: string[];
+    description?: string;
+    isPremium?: boolean;
+    price?: number;
+};
 export type MockChapter = { id: string; name: string; index: number };
 export type MockContentBlock = { type: 'text' | 'image'; value: string };
 export type MockComment = { id: string; user: string; content: string; createdAt: string };
 
 export const mockStories: MockStory[] = [
-    { id: '1', title: 'Đại Chúa Tể', author: 'Thiên Tàm Thổ Đậu', cover: 'https://picsum.photos/300/400?random=1', genres: ['Huyền Huyễn', 'Hành Động'], description: 'Thiên tài tuyệt thế bước lên con đường xưng bá.' },
-    { id: '2', title: 'Thám Tử Lừng Danh Conan', author: 'Aoyama Gosho', cover: 'https://picsum.photos/300/400?random=2', genres: ['Trinh Thám'], description: 'Câu chuyện về thám tử học sinh Conan.' },
-    { id: '3', title: 'One Piece', author: 'Eiichiro Oda', cover: 'https://picsum.photos/300/400?random=3', genres: ['Phiêu Lưu'], description: 'Luffy tìm kho báu One Piece.' },
-    { id: '4', title: 'Naruto', author: 'Masashi Kishimoto', cover: 'https://picsum.photos/300/400?random=4', genres: ['Hành Động'], description: 'Hành trình ninja Naruto.' },
-    { id: '5', title: 'Attack on Titan', author: 'Hajime Isayama', cover: 'https://picsum.photos/300/400?random=5', genres: ['Kịch Tính'], description: 'Con người chống lại Titan.' },
-    { id: '6', title: 'Solo Leveling', author: 'Chu-Gong', cover: 'https://picsum.photos/300/400?random=6', genres: ['Hành Động'], description: 'Thợ săn yếu nhất trở nên mạnh nhất.' },
-    { id: '7', title: 'Doraemon', author: 'Fujiko F. Fujio', cover: 'https://picsum.photos/300/400?random=7', genres: ['Hài Hước'], description: 'Chú mèo máy đến từ tương lai.' },
-    { id: '8', title: 'Kimetsu no Yaiba', author: 'Koyoharu Gotouge', cover: 'https://picsum.photos/300/400?random=8', genres: ['Hành Động'], description: 'Diệt quỷ cứu em gái.' },
-    { id: '9', title: 'Jujutsu Kaisen', author: 'Gege Akutami', cover: 'https://picsum.photos/300/400?random=9', genres: ['Siêu Nhiên'], description: 'Chú thuật sư trừ tà.' },
-    { id: '10', title: 'Spy x Family', author: 'Tatsuya Endo', cover: 'https://picsum.photos/300/400?random=10', genres: ['Gia Đình'], description: 'Gia đình mật vụ dễ thương.' },
+    { id: '1', title: 'Đại Chúa Tể', author: 'Thiên Tàm Thổ Đậu', cover: 'https://picsum.photos/seed/story-1/320/460', genres: ['Huyền Huyễn', 'Hành Động'], description: 'Thiên tài tuyệt thế bước lên con đường xưng bá.', isPremium: true, price: 39000 },
+    { id: '2', title: 'Thám Tử Lừng Danh Conan', author: 'Aoyama Gosho', cover: 'https://picsum.photos/seed/story-2/320/460', genres: ['Trinh Thám'], description: 'Câu chuyện về thám tử học sinh Conan.' },
+    { id: '3', title: 'One Piece', author: 'Eiichiro Oda', cover: 'https://picsum.photos/seed/story-3/320/460', genres: ['Phiêu Lưu'], description: 'Luffy tìm kho báu One Piece.', isPremium: true, price: 45000 },
+    { id: '4', title: 'Naruto', author: 'Masashi Kishimoto', cover: 'https://picsum.photos/seed/story-4/320/460', genres: ['Hành Động'], description: 'Hành trình ninja Naruto.' },
+    { id: '5', title: 'Attack on Titan', author: 'Hajime Isayama', cover: 'https://picsum.photos/seed/story-5/320/460', genres: ['Kịch Tính'], description: 'Con người chống lại Titan.', isPremium: true, price: 42000 },
+    { id: '6', title: 'Solo Leveling', author: 'Chu-Gong', cover: 'https://picsum.photos/seed/story-6/320/460', genres: ['Hành Động'], description: 'Thợ săn yếu nhất trở nên mạnh nhất.' },
+    { id: '7', title: 'Doraemon', author: 'Fujiko F. Fujio', cover: 'https://picsum.photos/seed/story-7/320/460', genres: ['Hài Hước'], description: 'Chú mèo máy đến từ tương lai.' },
+    { id: '8', title: 'Kimetsu no Yaiba', author: 'Koyoharu Gotouge', cover: 'https://picsum.photos/seed/story-8/320/460', genres: ['Hành Động'], description: 'Diệt quỷ cứu em gái.' },
+    { id: '9', title: 'Jujutsu Kaisen', author: 'Gege Akutami', cover: 'https://picsum.photos/seed/story-9/320/460', genres: ['Siêu Nhiên'], description: 'Chú thuật sư trừ tà.', isPremium: true, price: 36000 },
+    { id: '10', title: 'Spy x Family', author: 'Tatsuya Endo', cover: 'https://picsum.photos/seed/story-10/320/460', genres: ['Gia Đình'], description: 'Gia đình mật vụ dễ thương.' },
 ];
 
 export function getStoryById(id: string): MockStory | undefined {

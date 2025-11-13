@@ -1,31 +1,61 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from '@/providers/ThemeProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { SearchBar } from '@/components/SearchBar';
 import { EmailLoginModal } from '@/components/EmailLoginModal';
 import { User } from 'oidc-client-ts';
-import { Moon, Sun, LogIn, LogOut, User as UserIcon, BookOpen, Home, Flame, Grid3x3, History, Trophy, Menu, X, Mail } from 'lucide-react';
+import {
+	Menu,
+	X,
+	Moon,
+	Sun,
+	LogIn,
+	LogOut,
+	User as UserIcon,
+	Home,
+	Flame,
+	Grid3x3,
+	History,
+	Trophy,
+	Layers,
+	Mail,
+} from 'lucide-react';
 
 export function Navbar() {
 	const { current, theme, setTheme } = useTheme();
-    const { isAuthenticated, user, login, logout, refreshEmailUser } = useAuth();
+	const { isAuthenticated, user, login, logout, refreshEmailUser } = useAuth();
 	const navigate = useNavigate();
-    const location = useLocation();
-    const [openLoginMenu, setOpenLoginMenu] = useState(false);
-    const [openMobileMenu, setOpenMobileMenu] = useState(false);
-    const [openEmailLogin, setOpenEmailLogin] = useState(false);
-    const loginBtnRef = useRef<HTMLButtonElement | null>(null);
-    const menuRef = useRef<HTMLDivElement | null>(null);
-    const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+	const location = useLocation();
+	const [openLoginMenu, setOpenLoginMenu] = useState(false);
+	const [openMobileMenu, setOpenMobileMenu] = useState(false);
+	const [openEmailLogin, setOpenEmailLogin] = useState(false);
+	const loginBtnRef = useRef<HTMLButtonElement | null>(null);
+	const menuRef = useRef<HTMLDivElement | null>(null);
+	const mobileMenuRef = useRef<HTMLDivElement | null>(null);
 
-    const navItems = [
-        { path: '/', label: 'Trang chủ', icon: Home },
-        { path: '/hot', label: 'Truyện hot', icon: Flame },
-        { path: '/categories', label: 'Thể loại', icon: Grid3x3 },
-        { path: '/history', label: 'Lịch sử', icon: History },
-        { path: '/ranking', label: 'Xếp hạng', icon: Trophy },
-    ];
+	const isAdmin = useMemo(() => {
+		if (!user) return false;
+		const profile = (user as any)?.profile;
+		return (
+			(user as any)?.role === 'Admin' ||
+			profile?.role === 'Admin' ||
+			profile?.email?.includes('admin') ||
+			(user as any)?.email?.includes?.('admin')
+		);
+	}, [user]);
+
+	const navItems = useMemo(
+		() => [
+			{ path: '/', label: 'Trang chủ', icon: Home },
+			{ path: '/hot', label: 'Truyện hot', icon: Flame },
+			{ path: '/categories', label: 'Thể loại', icon: Grid3x3 },
+			{ path: '/history', label: 'Lịch sử', icon: History },
+			{ path: '/ranking', label: 'Xếp hạng', icon: Trophy },
+			...(isAdmin ? [{ path: '/admin', label: 'Quản lý', icon: Layers }] : []),
+		],
+		[isAdmin]
+	);
 
     const isActive = (path: string) => {
         if (path === '/') {
@@ -66,9 +96,14 @@ export function Navbar() {
 	return (
 		<header className="sticky top-0 z-40 w-full border-b border-zinc-200/60 bg-white/70 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/70">
 			<div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4">
-				<Link to="/" className="flex items-center gap-2 font-semibold">
-					<BookOpen className="h-5 w-5 text-brand" />
-					<span className="hidden sm:inline">TruyệnZ</span>
+				<Link to="/" className="flex items-center font-semibold text-lg tracking-tight">
+					<span className="text-brand">T</span>
+					<span className="text-amber-500">r</span>
+					<span className="text-emerald-500">u</span>
+					<span className="text-cyan-500">y</span>
+					<span className="text-purple-500">ệ</span>
+					<span className="text-rose-500">n</span>
+					<span className="ml-0.5 text-xl font-black uppercase tracking-wider text-zinc-900 drop-shadow-sm dark:text-white">Z</span>
 				</Link>
 				<nav className="hidden lg:flex items-center gap-1 ml-4">
 					{navItems.map((item) => {
@@ -111,22 +146,6 @@ export function Navbar() {
 					</button>
 					{isAuthenticated ? (
 						<>
-							{(() => {
-								const isAdmin = 
-									user?.profile?.email?.includes('admin') ||
-									(user as any)?.role === 'Admin' ||
-									user?.profile?.preferred_username?.includes('admin') ||
-									((user as any)?.profile as any)?.role === 'Admin';
-								return isAdmin ? (
-									<button
-										className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-										onClick={() => navigate('/admin')}
-									>
-										<Grid3x3 className="h-4 w-4" />
-										<span className="hidden sm:inline">Quản lý</span>
-									</button>
-								) : null;
-							})()}
 							<button
 								className="inline-flex items-center gap-2 rounded-md border border-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
 								onClick={() => navigate('/me')}

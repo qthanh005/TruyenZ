@@ -1,200 +1,329 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, Flame, Layers, Sparkles, Star } from 'lucide-react';
 
-type Story = { id: string; title: string; cover?: string; genres?: string[]; rating?: number; description?: string };
+type Story = {
+	id: string;
+	title: string;
+	cover?: string;
+	genres?: string[];
+	rating?: number;
+	description?: string;
+	isPremium?: boolean;
+	price?: number;
+};
+
+const HERO_ITEMS = [
+	{
+		id: '1',
+		title: 'Đại Chúa Tể',
+		description: 'Thiếu niên bước vào thế giới linh lực huyền ảo, viết lại truyền kỳ của bản thân.',
+		cover: 'https://picsum.photos/seed/hero-1/1200/680',
+		genres: ['Huyền Huyễn', 'Hành Động'],
+		badge: 'Siêu phẩm tuần này',
+	},
+	{
+		id: '2',
+		title: 'One Piece',
+		description: 'Băng hải tặc Mũ Rơm tiếp tục chinh phục biển cả và giấc mơ tự do.',
+		cover: 'https://picsum.photos/seed/hero-2/1200/680',
+		genres: ['Phiêu Lưu', 'Hành Động'],
+		badge: 'Đang leo hạng',
+	},
+	{
+		id: '3',
+		title: 'Attack on Titan',
+		description: 'Cuộc chiến sinh tồn giữa loài người và Titan với những bí mật kinh hoàng.',
+		cover: 'https://picsum.photos/seed/hero-3/1200/680',
+		genres: ['Kịch Tính', 'Hành Động'],
+		badge: 'Xu hướng',
+	},
+	{
+		id: '4',
+		title: 'Kimetsu no Yaiba',
+		description: 'Tanjiro bước vào luyện tập hơi thở mặt trời để giải cứu em gái.',
+		cover: 'https://picsum.photos/seed/hero-4/1200/680',
+		genres: ['Siêu Nhiên', 'Hành Động'],
+		badge: 'Cập nhật mới',
+	},
+];
+
+const NEW_STORIES = Array.from({ length: 12 }).map((_, i) => ({
+	id: `${i + 5}`,
+	title: `Truyện mới #${i + 1}`,
+	cover: `https://picsum.photos/seed/new-${i}/420/560`,
+	genres: i % 2 === 0 ? ['Hành Động'] : ['Trinh Thám', 'Hài Hước'],
+	isPremium: i % 3 === 0,
+	price: i % 3 === 0 ? 35000 + i * 1000 : undefined,
+}));
+
+const HOT_SIDEBAR = [
+	{
+		id: '11',
+		title: 'Đấu Phá Thương Khung',
+		cover: 'https://picsum.photos/seed/hot-side-1/120/168',
+		genres: ['Huyền Huyễn'],
+		views: 1_234_000,
+	},
+	{
+		id: '12',
+		title: 'Võ Luyện Đỉnh Phong',
+		cover: 'https://picsum.photos/seed/hot-side-2/120/168',
+		genres: ['Tiên Hiệp'],
+		views: 987_654,
+	},
+	{
+		id: '13',
+		title: 'Legend of the Northern Blade',
+		cover: 'https://picsum.photos/seed/hot-side-3/120/168',
+		genres: ['Kiếm Hiệp'],
+		views: 764_321,
+	},
+	{
+		id: '14',
+		title: 'Blue Lock',
+		cover: 'https://picsum.photos/seed/hot-side-4/120/168',
+		genres: ['Thể Thao'],
+		views: 543_210,
+	},
+];
+
+const CURATED_COLLECTIONS = [
+	{
+		title: 'Khởi đầu mạnh mẽ',
+		description: 'Những bộ truyện mở màn bùng nổ, cuốn hút ngay từ chương đầu tiên.',
+		color: 'from-emerald-500/15 via-emerald-500/10 to-emerald-500/5',
+		items: ['Solo Leveling', 'One Punch Man', 'Jujutsu Kaisen'],
+	},
+	{
+		title: 'Thế giới kỳ ảo',
+		description: 'Du hành qua những vũ trụ đầy ma pháp và sinh vật huyền bí.',
+		color: 'from-purple-500/15 via-purple-500/10 to-purple-500/5',
+		items: ['Đại Chúa Tể', 'Attack on Titan', 'Demon Slayer'],
+	},
+	{
+		title: 'Tiếng cười ngọt ngào',
+		description: 'Góc giải trí nhẹ nhàng với những tình huống hài hước, lãng mạn.',
+		color: 'from-amber-500/15 via-amber-500/10 to-amber-500/5',
+		items: ['Doraemon', 'Spy x Family', 'Our Beloved Summer'],
+	},
+];
 
 export default function HomePage() {
-    const [items, setItems] = useState<Story[]>([]);
-    const [hotItems, setHotItems] = useState<Story[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [page, setPage] = useState(1);
-    const pageSize = 12;
-    const [slide, setSlide] = useState(0);
+	const [slide, setSlide] = useState(0);
+	const [autoPlay, setAutoPlay] = useState(true);
 
-    useEffect(() => {
-        // Mock data
-        const mock: Story[] = [
-            { id: '1', title: 'Đại Chúa Tể', cover: 'https://picsum.photos/300/400?random=1', genres: ['Huyền Huyễn', 'Hành Động'] },
-            { id: '2', title: 'Thám Tử Lừng Danh Conan', cover: 'https://picsum.photos/300/400?random=2', genres: ['Trinh Thám'] },
-            { id: '3', title: 'One Piece', cover: 'https://picsum.photos/300/400?random=3', genres: ['Phiêu Lưu'] },
-            { id: '4', title: 'Naruto', cover: 'https://picsum.photos/300/400?random=4', genres: ['Hành Động'] },
-            { id: '5', title: 'Attack on Titan', cover: 'https://picsum.photos/300/400?random=5', genres: ['Hành Động', 'Kịch Tính'] },
-            { id: '6', title: 'Solo Leveling', cover: 'https://picsum.photos/300/400?random=6', genres: ['Hành Động'] },
-            { id: '7', title: 'Doraemon', cover: 'https://picsum.photos/300/400?random=7', genres: ['Hài Hước'] },
-            { id: '8', title: 'Kimetsu no Yaiba', cover: 'https://picsum.photos/300/400?random=8', genres: ['Hành Động'] },
-            { id: '9', title: 'Jujutsu Kaisen', cover: 'https://picsum.photos/300/400?random=9', genres: ['Siêu Nhiên'] },
-            { id: '10', title: 'Spy x Family', cover: 'https://picsum.photos/300/400?random=10', genres: ['Gia Đình'] },
-        ];
-        const hot: Story[] = [
-            { id: '11', title: 'Đấu Phá Thương Khung', cover: 'https://picsum.photos/96/128?random=11' },
-            { id: '12', title: 'Võ Luyện Đỉnh Phong', cover: 'https://picsum.photos/96/128?random=12' },
-            { id: '13', title: 'Tây Du Ký', cover: 'https://picsum.photos/96/128?random=13' },
-            { id: '14', title: 'Phong Vân', cover: 'https://picsum.photos/96/128?random=14' },
-            { id: '15', title: 'Yêu Thần Ký', cover: 'https://picsum.photos/96/128?random=15' },
-            { id: '16', title: 'Tales of Demons and Gods', cover: 'https://picsum.photos/96/128?random=16' },
-            { id: '17', title: 'The Beginning After The End', cover: 'https://picsum.photos/96/128?random=17' },
-            { id: '18', title: 'Legend of the Northern Blade', cover: 'https://picsum.photos/96/128?random=18' },
-            { id: '19', title: 'Kingdom', cover: 'https://picsum.photos/96/128?random=19' },
-            { id: '20', title: 'Blue Lock', cover: 'https://picsum.photos/96/128?random=20' },
-        ];
-        const timer = setTimeout(() => {
-            setItems(mock);
-            setHotItems(hot);
-            setLoading(false);
-        }, 400);
-        return () => clearTimeout(timer);
-    }, []);
+	useEffect(() => {
+		if (!autoPlay) return;
+		const interval = setInterval(() => {
+			setSlide((prev) => (prev + 1) % HERO_ITEMS.length);
+		}, 5000);
+		return () => clearInterval(interval);
+	}, [autoPlay]);
 
-    useEffect(() => {
-        if (loading || items.length === 0) return;
-        const t = setInterval(() => setSlide((s) => (s + 1) % Math.min(6, items.length)), 4000);
-        return () => clearInterval(t);
-    }, [loading, items.length]);
+	const heroActive = useMemo(() => HERO_ITEMS[slide], [slide]);
 
-    return (
-        <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-            <div className="md:col-span-2 space-y-8">
-                {!loading && items.length > 0 && (
-                    <section className="space-y-3 overflow-hidden rounded-2xl border border-zinc-200 p-0 shadow-sm dark:border-zinc-800">
-                        <div className="px-4 pt-4 sm:px-6">
-                            <h2 className="text-xl font-semibold tracking-tight">Truyện hot</h2>
-                        </div>
-                        <div className="relative h-60 w-full sm:h-72 md:h-80 lg:h-96 animate-scale-in">
-                            {items.slice(0, Math.min(6, items.length)).map((s, i) => (
-                                <div
-                                    key={s.id}
-                                    className={`absolute inset-0 transition-opacity duration-700 ease-out ${i === slide ? 'opacity-100' : 'opacity-0'}`}
-                                >
-                                    <Link to={`/story/${s.id}`} className="relative block h-full w-full">
-                                        <img
-                                            src={s.cover}
-                                            alt={s.title}
-                                            className="h-full w-full object-cover"
-                                        />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/40 to-transparent" />
-                                        <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6">
-                                            <div className="line-clamp-2 text-lg font-semibold text-white drop-shadow sm:text-2xl">{s.title}</div>
-                                            {s.genres && (
-                                                <div className="mt-1 line-clamp-1 text-xs text-zinc-200/90 sm:text-sm">{s.genres.join(', ')}</div>
-                                            )}
-                                        </div>
-                                    </Link>
-                                </div>
-                            ))}
-                            <button
-                                className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white backdrop-blur transition hover:bg-black/70"
-                                onClick={() => setSlide((s) => (s - 1 + Math.min(6, items.length)) % Math.min(6, items.length))}
-                                aria-label="Prev"
-                            >
-                                ‹
-                            </button>
-                            <button
-                                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white backdrop-blur transition hover:bg-black/70"
-                                onClick={() => setSlide((s) => (s + 1) % Math.min(6, items.length))}
-                                aria-label="Next"
-                            >
-                                ›
-                            </button>
-                            <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-2">
-                                {Array.from({ length: Math.min(6, items.length) }).map((_, i) => (
-                                    <button
-                                        key={i}
-                                        className={`dot h-1.5 w-6 rounded-full ${i === slide ? 'dot-active' : 'dot-inactive'}`}
-                                        onClick={() => setSlide(i)}
-                                        aria-label={`Go to slide ${i + 1}`}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                    </section>
-                )}
-                <section>
-                    <div className="mb-4 flex items-end justify-between">
-                        <h1 className="text-2xl font-semibold tracking-tight">Truyện mới cập nhật</h1>
-                        {!loading && (
-                            <span className="text-xs text-zinc-500">Hiển thị {Math.min(items.length, page * pageSize)} / {items.length}</span>
-                        )}
-                    </div>
-                    {loading ? (
-                        <div className="text-sm text-zinc-500">Đang tải...</div>
-                    ) : (
-                        <>
-                            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4">
-                                {items.slice((page - 1) * pageSize, page * pageSize).map((s, i) => (
-                                    <Link key={s.id} to={`/story/${s.id}`} className="group overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 animate-slide-up" style={{ ['--delay' as any]: `${i * 40}ms` }}>
-                                        <div className="relative aspect-[3/4] w-full overflow-hidden bg-zinc-100 dark:bg-zinc-800">
-                                            {s.cover ? (
-                                                <img src={s.cover} alt={s.title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
-                                            ) : (
-                                                <div className="flex h-full w-full items-center justify-center text-zinc-400">No Image</div>
-                                            )}
-                                            <div className="pointer-events-none absolute left-3 top-3 inline-flex rounded-full bg-brand/90 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white shadow-sm">Mới</div>
-                                        </div>
-                                        <div className="space-y-1 p-3">
-                                            <div className="line-clamp-2 font-medium leading-snug transition-colors group-hover:text-brand">{s.title}</div>
-                                            {s.genres && (
-                                                <div className="truncate text-xs text-zinc-500">{s.genres.join(', ')}</div>
-                                            )}
-                                        </div>
-                                    </Link>
-                                ))}
-                            </div>
-                            <div className="mt-4 flex items-center justify-center gap-2">
-                                <button
-                                    className="rounded-md border border-zinc-200 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-zinc-800"
-                                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                                    disabled={page === 1}
-                                >
-                                    Trước
-                                </button>
-                                {Array.from({ length: Math.max(1, Math.ceil(items.length / pageSize)) }).map((_, i) => (
-                                    <button
-                                        key={i}
-                                        className={`rounded-md px-3 py-1.5 text-sm ${page === i + 1 ? 'bg-brand text-white' : 'border border-zinc-200 dark:border-zinc-800'}`}
-                                        onClick={() => setPage(i + 1)}
-                                    >
-                                        {i + 1}
-                                    </button>
-                                ))}
-                                <button
-                                    className="rounded-md border border-zinc-200 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-zinc-800"
-                                    onClick={() => setPage((p) => Math.min(Math.ceil(items.length / pageSize), p + 1))}
-                                    disabled={page >= Math.ceil(items.length / pageSize)}
-                                >
-                                    Sau
-                                </button>
-                            </div>
-                        </>
-                    )}
-                </section>
-            </div>
-            <aside className="space-y-4">
-                <div className="rounded-xl border border-zinc-200 p-4 shadow-sm dark:border-zinc-800">
-                    <h3 className="mb-3 text-lg font-semibold">Truyện hot</h3>
-                    {loading ? (
-                        <div className="text-sm text-zinc-500">Đang tải...</div>
-                    ) : (
-                        <div className="space-y-3">
-                            {hotItems.map((s, idx) => (
-                                <Link key={s.id} to={`/story/${s.id}`} className="flex items-center gap-3 rounded-md p-1 transition hover:bg-zinc-50 dark:hover:bg-zinc-900">
-                                    <div className="h-16 w-12 overflow-hidden rounded bg-zinc-100 dark:bg-zinc-800">
-                                        {s.cover && <img src={s.cover} alt={s.title} className="h-full w-full object-cover" />}
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                        <div className="truncate text-sm font-medium">
-                                            <span className="mr-2 text-zinc-400">{idx + 1}.</span>
-                                            {s.title}
-                                        </div>
-                                        {s.genres && <div className="truncate text-xs text-zinc-500">{s.genres.join(', ')}</div>}
-                                    </div>
-                                </Link>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </aside>
-        </div>
-    );
+	const formatPrice = (price?: number) =>
+		new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(price ?? 39000);
+
+	return (
+		<div className="space-y-12">
+			<section className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-950 text-white shadow-lg dark:border-zinc-800">
+				<div className="relative h-[420px] w-full md:h-[480px]">
+					{HERO_ITEMS.map((story, index) => (
+						<Link
+							key={story.id}
+							to={`/story/${story.id}`}
+							className={`absolute inset-0 transition duration-[900ms] ease-out ${
+								index === slide ? 'opacity-100' : 'pointer-events-none opacity-0'
+							}`}
+						>
+							<img
+								src={story.cover}
+								alt={story.title}
+								className="h-full w-full object-cover"
+								loading="lazy"
+							/>
+							<div className="absolute inset-0 bg-gradient-to-br from-black/80 via-black/50 to-black/20" />
+							<div className="absolute inset-x-0 bottom-0 p-6 pb-8 sm:p-10">
+								<div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-300">
+									<Flame size={14} />
+									{story.badge}
+								</div>
+								<h2 className="mt-4 text-2xl font-semibold sm:text-3xl md:text-4xl">{story.title}</h2>
+								<p className="mt-2 max-w-2xl text-sm text-zinc-200 sm:text-base">{story.description}</p>
+								<div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-300">
+									{story.genres?.map((genre) => (
+										<span key={genre} className="rounded-full bg-white/10 px-3 py-1">
+											{genre}
+										</span>
+									))}
+								</div>
+							</div>
+						</Link>
+					))}
+
+					<button
+						className="absolute left-6 top-1/2 -translate-y-1/2 rounded-full bg-white/15 p-2 text-white backdrop-blur transition hover:bg-white/25"
+						onClick={(event) => {
+							event.preventDefault();
+							event.stopPropagation();
+							setAutoPlay(false);
+							setSlide((prev) => (prev - 1 + HERO_ITEMS.length) % HERO_ITEMS.length);
+						}}
+						aria-label="Slide trước"
+					>
+						<ArrowLeft size={18} />
+					</button>
+					<button
+						className="absolute right-6 top-1/2 -translate-y-1/2 rounded-full bg-white/15 p-2 text-white backdrop-blur transition hover:bg-white/25"
+						onClick={(event) => {
+							event.preventDefault();
+							event.stopPropagation();
+							setAutoPlay(false);
+							setSlide((prev) => (prev + 1) % HERO_ITEMS.length);
+						}}
+						aria-label="Slide tiếp"
+					>
+						<ArrowRight size={18} />
+					</button>
+				</div>
+				<div className="relative flex items-center justify-between border-t border-white/10 p-4 sm:p-6">
+					<div className="flex items-center gap-3 text-white">
+						<h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Hiện đang xem</h3>
+						<span className="text-base font-semibold">{heroActive.title}</span>
+					</div>
+					<div className="flex gap-2">
+						{HERO_ITEMS.map((_, index) => (
+							<button
+								key={index}
+								className={`h-1.5 w-12 rounded-full transition ${index === slide ? 'bg-white' : 'bg-white/30'}`}
+								onClick={() => {
+									setAutoPlay(false);
+									setSlide(index);
+								}}
+								aria-label={`Chuyển đến slide ${index + 1}`}
+							/>
+						))}
+					</div>
+				</div>
+			</section>
+
+			<section className="grid gap-6 md:grid-cols-3">
+				<div className="md:col-span-2 space-y-6">
+					<div className="flex items-center justify-between">
+						<div>
+							<h2 className="text-xl font-semibold text-zinc-900 dark:text-white">Truyện mới cập nhật</h2>
+							<p className="text-sm text-zinc-500">Tiếp tục đọc những bộ vừa ra chương mới.</p>
+						</div>
+						<button className="text-sm font-medium text-brand hover:underline">Xem tất cả</button>
+					</div>
+
+					<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+						{NEW_STORIES.map((story, index) => (
+							<Link
+								key={story.id}
+								to={`/story/${story.id}`}
+								className="group relative overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-brand/40 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-950"
+							>
+								<div className="relative aspect-[3/4] w-full overflow-hidden bg-zinc-200">
+									<img
+										src={story.cover}
+										alt={story.title}
+										className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+										loading="lazy"
+									/>
+									<div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
+									<div
+										className={`absolute left-3 top-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white ${
+											story.isPremium ? 'bg-amber-500' : 'bg-brand/90'
+										}`}
+									>
+										{story.isPremium ? 'Premium' : index % 2 === 0 ? 'Mới' : 'Cập nhật'}
+									</div>
+								</div>
+								<div className="space-y-2 p-3">
+									<h3 className="line-clamp-2 text-sm font-semibold text-zinc-900 transition group-hover:text-brand dark:text-white">
+										{story.title}
+									</h3>
+									{story.genres && (
+										<p className="text-xs text-zinc-500 dark:text-zinc-400">{story.genres.join(', ')}</p>
+									)}
+									{story.isPremium && (
+										<p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+											Giá: {formatPrice(story.price)}
+										</p>
+									)}
+								</div>
+							</Link>
+						))}
+					</div>
+				</div>
+
+				<aside className="space-y-6">
+					<div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+						<div className="flex items-center justify-between">
+							<h3 className="text-lg font-semibold text-zinc-900 dark:text-white">Top truyện hot</h3>
+							<button className="text-xs font-semibold text-brand hover:underline">Bảng xếp hạng</button>
+						</div>
+						<div className="mt-4 space-y-3">
+							{HOT_SIDEBAR.map((story, index) => (
+								<Link
+									key={story.id}
+									to={`/story/${story.id}`}
+									className="flex items-center gap-3 rounded-2xl p-2 transition hover:bg-zinc-50 dark:hover:bg-zinc-900"
+								>
+									<div className="relative h-20 w-16 overflow-hidden rounded-xl bg-zinc-200">
+										<img
+											src={story.cover}
+											alt={story.title}
+											className="h-full w-full object-cover"
+											loading="lazy"
+										/>
+										<div className="absolute left-1 top-1 rounded-full bg-zinc-900/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+											#{index + 1}
+										</div>
+									</div>
+									<div className="min-w-0 flex-1">
+										<h4 className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{story.title}</h4>
+										{story.genres && (
+											<p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{story.genres.join(', ')}</p>
+										)}
+										<p className="text-xs text-zinc-500 dark:text-zinc-400">
+											{story.views?.toLocaleString('vi-VN')} lượt xem
+										</p>
+									</div>
+								</Link>
+							))}
+						</div>
+					</div>
+
+					<div className="rounded-3xl border border-dashed border-zinc-200 p-6 text-center dark:border-zinc-800">
+						<h3 className="text-base font-semibold text-zinc-900 dark:text-white">Khám phá theo bộ sưu tập</h3>
+						<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+							Chọn từng bộ sưu tập để xem các đề xuất được tuyển chọn kỹ lưỡng.
+						</p>
+						<div className="mt-4 grid gap-3 text-left">
+							{CURATED_COLLECTIONS.map((collection) => (
+								<div key={collection.title} className={`rounded-2xl border border-transparent bg-gradient-to-r ${collection.color} p-4`}
+								>
+									<h4 className="text-sm font-semibold text-zinc-900 dark:text-white">{collection.title}</h4>
+									<p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">{collection.description}</p>
+									<div className="mt-2 flex flex-wrap gap-2 text-[11px] text-zinc-500">
+										{collection.items.map((item) => (
+											<span key={item} className="rounded-full bg-white/80 px-2 py-0.5 dark:bg-zinc-800/80">
+												{item}
+											</span>
+										))}
+									</div>
+								</div>
+							))}
+						</div>
+					</div>
+				</aside>
+			</section>
+		</div>
+	);
 }
 
 
