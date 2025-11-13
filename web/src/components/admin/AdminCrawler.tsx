@@ -1,37 +1,102 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+
+import { crawlerConfig } from '../../shared/config/env';
+
+type CrawlType = 'title' | 'images';
+
+const formatTimestamp = () => `[${new Date().toLocaleTimeString()}]`;
 
 export default function AdminCrawler() {
 	const [crawlUrl, setCrawlUrl] = useState('');
-	const [crawlType, setCrawlType] = useState<'title' | 'images'>('title');
+	const [crawlType, setCrawlType] = useState<CrawlType>('title');
 	const [isRunning, setIsRunning] = useState(false);
 	const [logs, setLogs] = useState<string[]>([]);
+	const controllerRef = useRef<AbortController | null>(null);
 
-	const handleStartCrawl = () => {
-		if (!crawlUrl.trim()) {
+	const appendLog = useCallback((message: string) => {
+		setLogs((prev) => [...prev, `${formatTimestamp()} ${message}`]);
+	}, []);
+
+	const appendCrawlerLogs = useCallback((lines: string[]) => {
+		if (!lines || lines.length === 0) return;
+		setLogs((prev) => [
+			...prev,
+			...lines
+				.map((line) => line.trim())
+				.filter((line) => line.length > 0)
+				.map((line) => `${formatTimestamp()} [Crawler] ${line}`),
+		]);
+	}, []);
+
+	const handleStartCrawl = useCallback(async () => {
+		const url = crawlUrl.trim();
+		if (!url) {
 			alert('Vui lòng nhập URL');
 			return;
 		}
 
+		if (crawlType === 'images') {
+			appendLog('Chức năng crawl ảnh chương hiện chưa được hỗ trợ từ giao diện.');
+			return;
+		}
+
 		setIsRunning(true);
-		setLogs([...logs, `[${new Date().toLocaleTimeString()}] Bắt đầu crawl ${crawlType} từ: ${crawlUrl}`]);
+		appendLog(`Bắt đầu crawl ${crawlType} từ: ${url}`);
+		appendLog('Đang gửi yêu cầu tới crawler server...');
 
-		// Mock crawl process
-		setTimeout(() => {
-			setLogs((prev) => [
-				...prev,
-				`[${new Date().toLocaleTimeString()}] Đang phân tích URL...`,
-				`[${new Date().toLocaleTimeString()}] Đã tìm thấy thông tin truyện`,
-				`[${new Date().toLocaleTimeString()}] Đang tải dữ liệu...`,
-				`[${new Date().toLocaleTimeString()}] Hoàn thành!`,
-			]);
+		const controller = new AbortController();
+		controllerRef.current = controller;
+
+		try {
+			const response = await fetch(`${crawlerConfig.apiBaseUrl}/api/crawl`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ url, type: crawlType }),
+				signal: controller.signal,
+			});
+
+			const rawBody = await response.text();
+			let payload: Record<string, unknown> = {};
+			try {
+				payload = rawBody ? JSON.parse(rawBody) : {};
+			} catch (parseError) {
+				console.warn('Không thể parse JSON từ crawler:', parseError);
+			}
+
+			const logs = Array.isArray(payload.logs) ? (payload.logs as string[]) : [];
+			if (logs.length > 0) {
+				appendCrawlerLogs(logs);
+			}
+
+			if (!response.ok) {
+				const errorMessage =
+					(typeof payload.error === 'string' && payload.error.trim().length > 0
+						? payload.error
+						: rawBody?.trim()) || `Máy chủ trả về mã ${response.status}`;
+				throw new Error(errorMessage);
+			}
+
+			appendLog('Hoàn thành quá trình crawl.');
+		} catch (error) {
+			if (error instanceof DOMException && error.name === 'AbortError') {
+				appendLog('Đã huỷ crawl theo yêu cầu.');
+			} else {
+				const message = error instanceof Error ? error.message : 'Lỗi không xác định';
+				appendLog(`Lỗi: ${message}`);
+			}
+		} finally {
+			controllerRef.current = null;
 			setIsRunning(false);
-		}, 3000);
-	};
+		}
+	}, [appendCrawlerLogs, appendLog, crawlType, crawlUrl]);
 
-	const handleStopCrawl = () => {
-		setIsRunning(false);
-		setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] Đã dừng crawl`]);
-	};
+	const handleCancel = useCallback(() => {
+		if (controllerRef.current) {
+			controllerRef.current.abort();
+			controllerRef.current = null;
+			appendLog('Đang gửi tín hiệu huỷ tới crawler...');
+		}
+	}, [appendLog]);
 
 	return (
 		<div className="space-y-6">
@@ -48,7 +113,7 @@ export default function AdminCrawler() {
 									name="crawlType"
 									value="title"
 									checked={crawlType === 'title'}
-									onChange={(e) => setCrawlType(e.target.value as 'title' | 'images')}
+									onChange={(e) => setCrawlType(e.target.value as CrawlType)}
 									className="text-brand"
 								/>
 								<span className="text-sm">Crawl thông tin truyện (crawl_title.py)</span>
@@ -59,7 +124,7 @@ export default function AdminCrawler() {
 									name="crawlType"
 									value="images"
 									checked={crawlType === 'images'}
-									onChange={(e) => setCrawlType(e.target.value as 'title' | 'images')}
+									onChange={(e) => setCrawlType(e.target.value as CrawlType)}
 									className="text-brand"
 								/>
 								<span className="text-sm">Crawl ảnh chương (crawl_images.py)</span>
@@ -86,10 +151,10 @@ export default function AdminCrawler() {
 						</button>
 						{isRunning && (
 							<button
-								onClick={handleStopCrawl}
+								onClick={handleCancel}
 								className="rounded-lg border border-red-500 bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
 							>
-								Dừng
+								Huỷ crawl
 							</button>
 						)}
 					</div>
@@ -112,7 +177,7 @@ export default function AdminCrawler() {
 						<div className="text-zinc-500">Chưa có logs...</div>
 					) : (
 						logs.map((log, idx) => (
-							<div key={idx} className="mb-1">
+							<div key={idx} className="mb-1 whitespace-pre-wrap">
 								{log}
 							</div>
 						))
@@ -125,11 +190,10 @@ export default function AdminCrawler() {
 				<h3 className="mb-2 text-lg font-semibold">Hướng dẫn sử dụng</h3>
 				<ul className="list-disc space-y-1 pl-5 text-sm">
 					<li>
-						<strong>Crawl thông tin truyện:</strong> Sử dụng để crawl thông tin cơ bản của truyện (tên, tác giả, ảnh bìa, thể
-						loại, danh sách chương)
+						<strong>Crawl thông tin truyện:</strong> Gửi yêu cầu chạy script Python `crawl_title.py`
 					</li>
 					<li>
-						<strong>Crawl ảnh chương:</strong> Sử dụng để tải các ảnh trong chương truyện về máy chủ
+						<strong>Crawl ảnh chương:</strong> Tính năng từ giao diện đang được chuẩn bị
 					</li>
 					<li>Đảm bảo URL hợp lệ từ truyenqqgo.com</li>
 					<li>Quá trình crawl có thể mất vài phút tùy thuộc vào số lượng dữ liệu</li>
@@ -138,4 +202,3 @@ export default function AdminCrawler() {
 		</div>
 	);
 }
-

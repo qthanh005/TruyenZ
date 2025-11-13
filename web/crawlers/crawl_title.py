@@ -1,28 +1,25 @@
+import argparse
+import json
+import os
+import random
+import re
+import sys
+import time
+import unicodedata
+from typing import Dict, List, Optional
+from urllib.parse import urljoin
+
 import requests
 from bs4 import BeautifulSoup
-import os
-import re
-import unicodedata
-import time
-import random
-import pymysql
-from urllib.parse import urljoin
-from typing import List, Dict, Optional
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from datetime import datetime, timedelta
 
-# Cấu hình database
-DB_CONFIG = {
-    'host': 'localhost',
-    'user': 'root',
-    'password': '',
-    'database': 'db_truyenz',
-    'charset': 'utf8mb4'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WEB_ROOT = os.path.normpath(os.path.join(BASE_DIR, ".."))
+PUBLIC_IMAGES_ROOT = os.path.join(WEB_ROOT, "public", "images")
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
-
-def get_db_connection():
-    return pymysql.connect(**DB_CONFIG)
 
 def slugify(text):
     text = unicodedata.normalize('NFKD', text)
@@ -56,6 +53,68 @@ def download_image(image_url, save_dir, filename=None):
         print(f"Lỗi khi tải ảnh: {e}")
     return None
 
+def download_chapter_images(chapter_url: str, save_dir: str) -> List[str]:
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"Đang tải ảnh cho chương: {chapter_url}")
+    try:
+        time.sleep(random.uniform(1.5, 2.5))
+        response = requests.get(chapter_url, headers={**DEFAULT_HEADERS, "Referer": chapter_url}, timeout=15)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Lỗi khi truy cập chương {chapter_url}: {e}")
+        return []
+
+    soup = BeautifulSoup(response.content, "html.parser")
+    image_tags = soup.select(".chapter-content img, .chapter_content img, #chapter-content img")
+    saved_paths = []
+
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+    session.headers["Referer"] = chapter_url
+
+    for index, img_tag in enumerate(image_tags, start=1):
+        src = img_tag.get("data-src") or img_tag.get("src")
+        if not src:
+            continue
+        if src.startswith("//"):
+            src = "https:" + src
+        elif not src.startswith("http"):
+            src = urljoin(chapter_url, src)
+
+        filename = f"{index:03}.jpg"
+        save_path = os.path.join(save_dir, filename)
+
+        try:
+            time.sleep(random.uniform(1.0, 2.0))
+            img_response = session.get(src, stream=True, timeout=15)
+            img_response.raise_for_status()
+            with open(save_path, "wb") as img_file:
+                for chunk in img_response.iter_content(1024):
+                    img_file.write(chunk)
+            saved_paths.append(save_path)
+            print(f"  Đã lưu ảnh: {save_path}")
+        except Exception as e:
+            print(f"  Lỗi khi tải ảnh {src}: {e}")
+
+    print(f"Hoàn tất {len(saved_paths)} ảnh cho chương: {chapter_url}")
+    return saved_paths
+
+def print_comic_summary(comic_data: Dict):
+    print("\n--- Thông tin truyện đã crawl ---")
+    for key, value in comic_data.items():
+        if isinstance(value, list):
+            print(f"{key}:")
+            for item in value:
+                if isinstance(item, dict):
+                    summary = ", ".join(f"{k}={v}" for k, v in item.items())
+                    print(f"  - {summary}")
+                else:
+                    print(f"  - {item}")
+        else:
+            print(f"{key}: {value}")
+
+
+
 def get_info_by_icon(soup, icon_class):
     items = soup.select("ul.list-info li.row")
     for item in items:
@@ -66,7 +125,7 @@ def get_info_by_icon(soup, icon_class):
                 return value_tag.text.strip()
     return "Đang cập nhật"
 
-def crawl_comic_chapters(comic_url: str, comic_id: int) -> List[Dict]:
+def crawl_comic_chapters(comic_url: str) -> List[Dict]:
     session = requests.Session()
     retries = Retry(total=5, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504])
     session.mount('https://', HTTPAdapter(max_retries=retries))
@@ -102,7 +161,6 @@ def crawl_comic_chapters(comic_url: str, comic_id: int) -> List[Dict]:
 
         
         chapters.append({
-            "comic_id": comic_id,
             "chapter_number": chapter_number,
             "title": chapter_title,
             "url": chapter_url
@@ -110,131 +168,16 @@ def crawl_comic_chapters(comic_url: str, comic_id: int) -> List[Dict]:
     
     return chapters
 
-def save_comic_to_db(comic_data: Dict):
-    connection = get_db_connection()
-    try:
-        with connection.cursor() as cursor:
-            slug = slugify(comic_data['Tên truyện'])
-
-            # Kiểm tra truyện đã tồn tại
-            cursor.execute("SELECT id FROM comics WHERE slug = %s", (slug,))
-            result = cursor.fetchone()
-
-            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-            if result:
-                comic_id = result[0]
-                print(f"Truyện '{comic_data['Tên truyện']}' đã tồn tại. Cập nhật thông tin...")
-
-                # Cập nhật các thông tin có thể thay đổi
-                update_sql = """
-                    UPDATE comics SET
-                        cover_image = %s,
-                        views = %s,
-                        follows = %s,
-                        last_crawled_at = %s
-                    WHERE id = %s
-                """
-                cursor.execute(update_sql, (
-                    comic_data['Ảnh bìa'],
-                    int(comic_data['Lượt xem'].replace(',', '')) if comic_data['Lượt xem'] != 'Đang cập nhật' else 0,
-                    int(comic_data['Lượt theo dõi'].replace(',', '')) if comic_data['Lượt theo dõi'] != 'Đang cập nhật' else 0,
-                    now,
-                    comic_id
-                ))
-                connection.commit()
-                return comic_id
-
-            # Nếu chưa có -> thêm mới
-            insert_sql = """
-                INSERT INTO comics (title, slug, author, status, cover_image, views, follows, last_crawled_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """
-            cursor.execute(insert_sql, (
-                comic_data['Tên truyện'],
-                slug,
-                comic_data['Tác giả'],
-                'Ongoing' if 'Đang' in comic_data['Tình trạng'] else 'Completed',
-                comic_data['Ảnh bìa'],
-                int(comic_data['Lượt xem'].replace(',', '')) if comic_data['Lượt xem'] != 'Đang cập nhật' else 0,
-                int(comic_data['Lượt theo dõi'].replace(',', '')) if comic_data['Lượt theo dõi'] != 'Đang cập nhật' else 0,
-                now
-            ))
-
-            comic_id = cursor.lastrowid
-
-            # Lưu thể loại
-            for genre in comic_data['Thể loại']:
-                cursor.execute("SELECT id FROM genres WHERE name = %s", (genre,))
-                result = cursor.fetchone()
-
-                if result:
-                    genre_id = result[0]
-                else:
-                    cursor.execute("INSERT INTO genres (name) VALUES (%s)", (genre,))
-                    genre_id = cursor.lastrowid
-
-                cursor.execute(
-                    "INSERT INTO comic_genres (comic_id, genre_id) VALUES (%s, %s)",
-                    (comic_id, genre_id)
-                )
-
-            connection.commit()
-            return comic_id
-    except Exception as e:
-        print(f"Lỗi khi lưu truyện vào database: {e}")
-        connection.rollback()
-        return None
-    finally:
-        connection.close()
-
-def save_chapter_to_db(connection, chapter_data: Dict):
-    try:
-        with connection.cursor() as cursor:
-            # Kiểm tra nếu chapter đã tồn tại
-            cursor.execute(
-                "SELECT id FROM chapters WHERE comic_id = %s AND chapter_number = %s",
-                (chapter_data["comic_id"], chapter_data["chapter_number"])
-            )
-            if cursor.fetchone():
-                print(f"Chương {chapter_data['chapter_number']} đã tồn tại, bỏ qua.")
-                return False
-
-            # Lưu thông tin chapter
-            sql = """
-            INSERT INTO chapters (comic_id, chapter_number, title, views, status)
-            VALUES (%s, %s, %s, %s, %s)
-            """
-            cursor.execute(sql, (
-                chapter_data["comic_id"],
-                chapter_data["chapter_number"],
-                chapter_data["title"],
-                0,  # Lượt xem ban đầu
-                "Published"
-            ))
-            
-        connection.commit()
-        return True
-    except Exception as e:
-        print(f"Lỗi khi lưu chapter vào database: {e}")
-        connection.rollback()
-        return False
-
-
 def crawl_truyen_info(url: str, crawl_chapters: bool = True) -> Optional[Dict]:
     slug = slugify(url.split("/")[-1])
-    if not should_crawl_comic(slug):
-        return None
+    save_directory = os.path.join(PUBLIC_IMAGES_ROOT, slug)
+    os.makedirs(save_directory, exist_ok=True)
     session = requests.Session()
     retries = Retry(total=5, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504])
     session.mount('https://', HTTPAdapter(max_retries=retries))
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-    
     try:
-        response = session.get(url, headers=headers)
+        response = session.get(url, headers=DEFAULT_HEADERS)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"Lỗi khi truy cập URL: {e}")
@@ -262,61 +205,99 @@ def crawl_truyen_info(url: str, crawl_chapters: bool = True) -> Optional[Dict]:
 
         # Tải ảnh bìa
         cover_filename = slugify(title) + ".jpg"
-        cover_path = download_image(cover, 'public/images/', cover_filename)
+        cover_path = download_image(cover, save_directory, cover_filename)
+        if cover_path and os.path.isabs(cover_path):
+            cover_relative = os.path.relpath(cover_path, WEB_ROOT)
+        else:
+            cover_relative = cover_path
 
         comic_data = {
             "Tên truyện": title,
-            "Ảnh bìa": cover_path or cover,
+            "Ảnh bìa": cover_relative or cover,
             "Tác giả": author,
             "Tình trạng": status,
             "Lượt xem": views,
             "Lượt theo dõi": follows,
-            "Thể loại": genres
+            "Thể loại": genres,
+            "Thư mục lưu": os.path.relpath(save_directory, WEB_ROOT) if os.path.isabs(save_directory) else save_directory
         }
+        if likes:
+            comic_data["Lượt thích"] = likes
 
-        comic_id = save_comic_to_db(comic_data)
-        
-        # Crawl danh sách chương nếu cần
-        if crawl_chapters and comic_id:
-            chapters = crawl_comic_chapters(url, comic_id)
-            connection = get_db_connection()
+        chapters_data: List[Dict] = []
+        if crawl_chapters:
+            chapters = crawl_comic_chapters(url)
             for chapter in chapters:
-                save_chapter_to_db(connection, chapter)
-            connection.close()
+                chapter_number = chapter["chapter_number"]
+                chapter_folder_name = f"chapter_{str(chapter_number).replace('.', '_')}"
+                chapter_dir = os.path.join(save_directory, chapter_folder_name)
+                image_paths = download_chapter_images(chapter["url"], chapter_dir)
+                image_rel_paths = [
+                    os.path.relpath(path, WEB_ROOT) if os.path.isabs(path) else path
+                    for path in image_paths
+                ]
+                chapters_data.append({
+                    "Số chương": chapter_number,
+                    "Tiêu đề": chapter["title"],
+                    "URL": chapter["url"],
+                    "Thư mục": os.path.relpath(chapter_dir, WEB_ROOT) if os.path.isabs(chapter_dir) else chapter_dir,
+                    "Ảnh đã tải": image_rel_paths
+                })
+
+        if chapters_data:
+            comic_data["Danh sách chương"] = chapters_data
+
+        info_path = os.path.join(save_directory, "info.json")
+        try:
+            with open(info_path, "w", encoding="utf-8") as info_file:
+                json.dump(
+                    {k: v for k, v in comic_data.items() if k != "Thư mục lưu"},
+                    info_file,
+                    ensure_ascii=False,
+                    indent=2
+                )
+            comic_data["Thông tin lưu"] = os.path.relpath(info_path, WEB_ROOT) if os.path.isabs(info_path) else info_path
+        except Exception as e:
+            print(f"Lỗi khi lưu thông tin truyện: {e}")
 
         return comic_data
     except Exception as e:
         print(f"Lỗi khi lấy thông tin truyện: {e}")
         return None
 
-def should_crawl_comic(slug: str, within_hours: int = 24):
-    connection = get_db_connection()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT last_crawled_at FROM comics WHERE slug = %s", (slug,))
-            result = cursor.fetchone()
-            if result and result[0]:
-                last_crawled = result[0]
-                if datetime.now() - last_crawled < timedelta(hours=within_hours):
-                    print(f"Truyện đã được crawl gần đây, bỏ qua.")
-                    return False
-        return True
-    except:
-        return True
-    finally:
-        connection.close()
 
-# Sử dụng
-if __name__ == "__main__":
-    url = "https://truyenqqgo.com/truyen-tranh/i-thought-she-was-a-yandere-but-apparently-shes-even-worse-fan-colored-17622"
-    data = crawl_truyen_info(url, crawl_chapters=True)
-    
+def parse_args():
+    parser = argparse.ArgumentParser(description="Crawl thông tin truyện từ truyenqq.")
+    parser.add_argument("--url", help="Đường dẫn truyện cần crawl")
+    parser.add_argument(
+        "--skip-chapters",
+        action="store_true",
+        help="Bỏ qua việc tải ảnh các chương"
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    url = args.url
+
+    if not url:
+        print("Vui lòng cung cấp URL truyện bằng tham số --url.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Bắt đầu crawl truyện từ URL: {url}")
+    data = crawl_truyen_info(url, crawl_chapters=not args.skip_chapters)
+
     if data:
-        print("\nThông tin truyện:")
-        for k, v in data.items():
-            if isinstance(v, list):
-                print(f"{k}: {', '.join(v)}")
-            else:
-                print(f"{k}: {v}")
-    else:
-        print("Không thể crawl dữ liệu từ URL đã cho.")
+        print_comic_summary(data)
+        info_path = data.get("Thông tin lưu")
+        if info_path:
+            print(f"File thông tin: {info_path}")
+        sys.exit(0)
+
+    print("Không thể crawl dữ liệu từ URL đã cho.", file=sys.stderr)
+    sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

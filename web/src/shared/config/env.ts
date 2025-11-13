@@ -3,6 +3,10 @@ export const apiConfig = {
 	gatewayBaseUrl: import.meta.env.VITE_API_GATEWAY_URL || 'https://api.truyenz.example.com',
 };
 
+export const crawlerConfig = {
+	apiBaseUrl: import.meta.env.VITE_CRAWLER_API_URL || 'http://localhost:4000',
+};
+
 export const oauthConfig = {
 	issuer: import.meta.env.VITE_OAUTH_ISSUER || 'https://auth.example.com/realms/truyenz',
 	clientId: import.meta.env.VITE_OAUTH_CLIENT_ID || 'truyenz-web',
