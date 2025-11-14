@@ -60,7 +60,9 @@ for chapter_number in range(current_chapter, 0, -1):
 
     # Tìm ảnh trong chapter
     images = driver.find_elements(By.CSS_SELECTOR, '.chapter_content img')
-    folder_path = f'public/images/{comic_slug}/chapter_{chapter_number}'
+    # Lưu vào story-service/public/images với cấu trúc {slug}/{chapterNumber}
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    folder_path = os.path.join(base_dir, 'services', 'story-service', 'public', 'images', comic_slug, str(chapter_number))
     os.makedirs(folder_path, exist_ok=True)
 
     headers = {
@@ -84,7 +86,8 @@ for chapter_number in range(current_chapter, 0, -1):
 
             filename = f'{idx+1:03}.jpg'
             file_path = os.path.join(folder_path, filename)
-            relative_path = f'public/images/{comic_slug}/chapter_{chapter_number}/{filename}'
+            # URL path để khớp với story-service: /public/images/{slug}/{chapterNumber}/{filename}
+            relative_path = f'/public/images/{comic_slug}/{chapter_number}/{filename}'
 
             with open(file_path, 'wb') as f:
                 f.write(response.content)

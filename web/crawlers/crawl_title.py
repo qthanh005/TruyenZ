@@ -16,7 +16,7 @@ from urllib3.util.retry import Retry
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_ROOT = os.path.normpath(os.path.join(BASE_DIR, ".."))
-PUBLIC_IMAGES_ROOT = os.path.join(WEB_ROOT, "public", "images")
+PUBLIC_IMAGES_ROOT = os.path.join(WEB_ROOT, "services", "story-service", "public", "images")
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
@@ -203,13 +203,10 @@ def crawl_truyen_info(url: str, crawl_chapters: bool = True) -> Optional[Dict]:
         views = get_info_by_icon(soup, "fa-eye")
         genres = [a.text.strip() for a in soup.select("ul.list01 li.li03 a")]
 
-        # Tải ảnh bìa
-        cover_filename = slugify(title) + ".jpg"
-        cover_path = download_image(cover, save_directory, cover_filename)
-        if cover_path and os.path.isabs(cover_path):
-            cover_relative = os.path.relpath(cover_path, WEB_ROOT)
-        else:
-            cover_relative = cover_path
+        # Tải ảnh bìa - lưu với tên "cover.jpg" để khớp với story-service
+        cover_path = download_image(cover, save_directory, "cover.jpg")
+        # URL path để khớp với story-service: /public/images/{slug}/cover.jpg
+        cover_relative = f"/public/images/{slug}/cover.jpg" if cover_path else cover
 
         comic_data = {
             "Tên truyện": title,
@@ -229,13 +226,16 @@ def crawl_truyen_info(url: str, crawl_chapters: bool = True) -> Optional[Dict]:
             chapters = crawl_comic_chapters(url)
             for chapter in chapters:
                 chapter_number = chapter["chapter_number"]
-                chapter_folder_name = f"chapter_{str(chapter_number).replace('.', '_')}"
-                chapter_dir = os.path.join(save_directory, chapter_folder_name)
+                # Sử dụng số chương trực tiếp (không có prefix "chapter_") để khớp với story-service
+                chapter_num_str = str(int(chapter_number)) if chapter_number == int(chapter_number) else str(chapter_number)
+                chapter_dir = os.path.join(save_directory, chapter_num_str)
                 image_paths = download_chapter_images(chapter["url"], chapter_dir)
-                image_rel_paths = [
-                    os.path.relpath(path, WEB_ROOT) if os.path.isabs(path) else path
-                    for path in image_paths
-                ]
+                # Tạo URL paths để khớp với story-service: /public/images/{slug}/{chapterNumber}/{filename}
+                image_rel_paths = []
+                for idx, path in enumerate(image_paths, start=1):
+                    filename = os.path.basename(path)
+                    url_path = f"/public/images/{slug}/{chapter_num_str}/{filename}"
+                    image_rel_paths.append(url_path)
                 chapters_data.append({
                     "Số chương": chapter_number,
                     "Tiêu đề": chapter["title"],
