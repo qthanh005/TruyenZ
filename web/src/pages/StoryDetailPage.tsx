@@ -4,11 +4,12 @@ import { Flame, Layers, Lock, Sparkles, Star, Users } from 'lucide-react';
 
 import { CheckoutModal } from '@/components/payments/CheckoutModal';
 import { usePremiumStore } from '@/shared/stores/premiumStore';
-import { getChapters, getStoryById, getComments, MockComment } from '@/shared/mocks';
+import { getComments, MockComment } from '@/shared/mocks';
+import { api, endpoints } from '@/services/apiClient';
 
-type Chapter = { id: string; name: string; index?: number };
+type Chapter = { id: string | number; name: string; index?: number; chapterNumber?: number };
 type Story = {
-	id: string;
+	id: string | number;
 	title: string;
 	author?: string;
 	cover?: string;
@@ -16,6 +17,25 @@ type Story = {
 	genres?: string[];
 	isPremium?: boolean;
 	price?: number;
+};
+
+type StoryResponse = {
+	id: number;
+	title: string;
+	description?: string;
+	genres?: string[];
+	coverImageId?: string;
+	paid: boolean;
+	price: number;
+	author: string;
+};
+
+type ChapterResponse = {
+	id: number;
+	storyId: number;
+	chapterNumber: number;
+	title: string;
+	imageIds?: string[];
 };
 
 const mockStats = {
@@ -44,23 +64,72 @@ export default function StoryDetailPage() {
 	const { storyId } = useParams();
 	const [story, setStory] = useState<Story | null>(null);
 	const [chapters, setChapters] = useState<Chapter[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
 	const [commentPage, setCommentPage] = useState(1);
 	const [comments, setComments] = useState<MockComment[]>([]);
 	const [totalComments, setTotalComments] = useState(0);
 	const [newComment, setNewComment] = useState('');
 	const openCheckout = usePremiumStore((state) => state.openCheckout);
 	const purchases = usePremiumStore((state) => state.purchases);
-	const purchaseRecord = storyId ? purchases[storyId] : undefined;
+	const purchaseRecord = storyId ? purchases[storyId as string] : undefined;
 
+	// Load story details from API
 	useEffect(() => {
 		if (!storyId) return;
-		const timer = setTimeout(() => {
-			const s = getStoryById(storyId) || null;
-			const c = getChapters(storyId, 30);
-			setStory(s);
-			setChapters(c);
-		}, 300);
-		return () => clearTimeout(timer);
+
+		const loadStory = async () => {
+			try {
+				setLoading(true);
+				setError(null);
+
+				// Load story details
+				const storyResponse = await api.get<StoryResponse>(endpoints.storyDetail(storyId));
+				const storyData = storyResponse.data;
+
+				// Map story response to Story type
+				const coverUrl = storyData.coverImageId
+					? `${import.meta.env.VITE_API_GATEWAY_URL || 'http://localhost:8081'}${storyData.coverImageId}`
+					: `https://picsum.photos/seed/story-${storyData.id}/1200/680`;
+
+				const mappedStory: Story = {
+					id: storyData.id,
+					title: storyData.title,
+					author: storyData.author,
+					cover: coverUrl,
+					description: storyData.description,
+					genres: storyData.genres || [],
+					isPremium: storyData.paid,
+					price: storyData.price > 0 ? storyData.price : undefined,
+				};
+
+				setStory(mappedStory);
+
+				// Load chapters
+				const chaptersResponse = await api.get<ChapterResponse[]>(endpoints.chapters(storyId));
+				const chaptersData = chaptersResponse.data;
+
+				// Map chapters response to Chapter type
+				const mappedChapters: Chapter[] = chaptersData.map((ch) => ({
+					id: ch.id,
+					name: ch.title,
+					index: ch.chapterNumber,
+					chapterNumber: ch.chapterNumber,
+				}));
+
+				// Sort by chapter number
+				mappedChapters.sort((a, b) => (a.chapterNumber || 0) - (b.chapterNumber || 0));
+
+				setChapters(mappedChapters);
+			} catch (err) {
+				console.error('Error loading story:', err);
+				setError('Không thể tải thông tin truyện. Vui lòng thử lại sau.');
+			} finally {
+				setLoading(false);
+			}
+		};
+
+		loadStory();
 	}, [storyId]);
 
 	useEffect(() => {
@@ -100,6 +169,31 @@ export default function StoryDetailPage() {
 	};
 
 	if (!storyId) return null;
+
+	if (loading) {
+		return (
+			<div className="flex items-center justify-center py-20">
+				<div className="text-center">
+					<div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-brand border-r-transparent"></div>
+					<p className="mt-4 text-sm text-zinc-500">Đang tải thông tin truyện...</p>
+				</div>
+			</div>
+		);
+	}
+
+	if (error) {
+		return (
+			<div className="rounded-3xl border border-red-200 bg-red-50 p-8 text-center dark:border-red-800 dark:bg-red-900/20">
+				<p className="text-sm font-medium text-red-600 dark:text-red-400">{error}</p>
+				<button
+					onClick={() => window.location.reload()}
+					className="mt-4 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90"
+				>
+					Thử lại
+				</button>
+			</div>
+		);
+	}
 
 	return (
 		<div className="space-y-10">
@@ -230,21 +324,27 @@ export default function StoryDetailPage() {
 									!canRead ? 'pointer-events-none blur-sm opacity-60' : ''
 								}`}
 							>
-								{chapters.map((chapter) => (
-									<Link
-										key={chapter.id}
-										to={`/story/${storyId}/chapter/${chapter.id}`}
-										className="group flex items-center justify-between rounded-2xl border border-zinc-200 px-4 py-3 text-sm transition hover:-translate-y-0.5 hover:border-brand/40 hover:bg-brand/5 dark:border-zinc-800 dark:hover:border-brand/50"
-									>
-										<div>
-											<p className="font-semibold text-zinc-800 transition group-hover:text-brand dark:text-white">
-												{chapter.index ? `Chương ${chapter.index}` : 'Chương chưa đánh số'}
-											</p>
-											<p className="text-xs text-zinc-500 dark:text-zinc-400">{chapter.name}</p>
-										</div>
-										<div className="text-xs font-semibold text-brand">Đọc</div>
-									</Link>
-								))}
+								{chapters.length > 0 ? (
+									chapters.map((chapter) => (
+										<Link
+											key={chapter.id}
+											to={`/story/${storyId}/chapter/${chapter.chapterNumber || chapter.id}`}
+											className="group flex items-center justify-between rounded-2xl border border-zinc-200 px-4 py-3 text-sm transition hover:-translate-y-0.5 hover:border-brand/40 hover:bg-brand/5 dark:border-zinc-800 dark:hover:border-brand/50"
+										>
+											<div>
+												<p className="font-semibold text-zinc-800 transition group-hover:text-brand dark:text-white">
+													{chapter.chapterNumber ? `Chương ${chapter.chapterNumber}` : chapter.index ? `Chương ${chapter.index}` : 'Chương chưa đánh số'}
+												</p>
+												<p className="text-xs text-zinc-500 dark:text-zinc-400">{chapter.name}</p>
+											</div>
+											<div className="text-xs font-semibold text-brand">Đọc</div>
+										</Link>
+									))
+								) : (
+									<div className="col-span-full py-8 text-center text-sm text-zinc-500">
+										Chưa có chương nào
+									</div>
+								)}
 							</div>
 							{!canRead && story?.isPremium && (
 								<div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl border border-dashed border-brand/60 bg-white/85 text-center shadow-inner backdrop-blur-sm dark:bg-zinc-900/90">

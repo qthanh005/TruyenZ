@@ -13,8 +13,8 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 const storageKey = 'tz_theme';
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-	const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem(storageKey) as Theme) || 'system');
-	const [current, setCurrent] = useState<'light' | 'dark'>(() => 'light');
+	const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem(storageKey) as Theme) || 'dark');
+	const [current, setCurrent] = useState<'light' | 'dark'>(() => 'dark');
 
 	useEffect(() => {
 		const root = window.document.documentElement;

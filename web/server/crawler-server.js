@@ -28,7 +28,20 @@ app.get('/health', (_req, res) => {
 });
 
 app.post('/api/crawl', async (req, res) => {
-	const { url, type = 'title', skipChapters = false } = req.body ?? {};
+	const { 
+		url, 
+		type = 'title', 
+		skipChapters = false,
+		skipApi = false,
+		userId = '1',
+		storyServiceUrl = 'http://localhost:8083',
+		useDb = false,
+		dbHost = 'localhost',
+		dbPort = '5432',
+		dbName = 'story_db',
+		dbUser = 'postgres',
+		dbPassword = 'postgres123'
+	} = req.body ?? {};
 
 	if (!url || typeof url !== 'string') {
 		return res.status(400).json({ error: 'Thiếu tham số url' });
@@ -42,6 +55,24 @@ app.post('/api/crawl', async (req, res) => {
 	const args = [scriptPath, '--url', url];
 	if (skipChapters) {
 		args.push('--skip-chapters');
+	}
+	if (skipApi) {
+		args.push('--skip-api');
+	}
+	if (useDb) {
+		args.push('--use-db');
+		args.push('--db-host', dbHost);
+		args.push('--db-port', dbPort);
+		args.push('--db-name', dbName);
+		args.push('--db-user', dbUser);
+		args.push('--db-password', dbPassword);
+	} else {
+		if (userId) {
+			args.push('--user-id', String(userId));
+		}
+		if (storyServiceUrl) {
+			args.push('--story-service-url', storyServiceUrl);
+		}
 	}
 
 	const stdoutChunks = [];

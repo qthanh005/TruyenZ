@@ -8,11 +8,20 @@ import time
 import unicodedata
 from typing import Dict, List, Optional
 from urllib.parse import urljoin
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+try:
+    import psycopg2
+    from psycopg2.extras import execute_values
+    PSYCOPG2_AVAILABLE = True
+except ImportError:
+    PSYCOPG2_AVAILABLE = False
+    print("Warning: psycopg2 not available. Direct database connection disabled.")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_ROOT = os.path.normpath(os.path.join(BASE_DIR, ".."))
@@ -20,6 +29,17 @@ PUBLIC_IMAGES_ROOT = os.path.join(WEB_ROOT, "services", "story-service", "public
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
+
+# Story Service API Configuration
+STORY_SERVICE_URL = os.getenv("STORY_SERVICE_URL", "http://localhost:8083")
+STORY_SERVICE_USER_ID = os.getenv("STORY_SERVICE_USER_ID", "1")  # Default user ID for crawler
+
+# PostgreSQL Database Configuration (story_db)
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "story_db")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres123")
 
 def slugify(text):
     text = unicodedata.normalize('NFKD', text)
@@ -99,6 +119,168 @@ def download_chapter_images(chapter_url: str, save_dir: str) -> List[str]:
     print(f"Hoàn tất {len(saved_paths)} ảnh cho chương: {chapter_url}")
     return saved_paths
 
+def create_story_via_api(title: str, description: str, genres: List[str], cover_image_id: str, 
+                         service_url: str = None, user_id: str = None) -> Optional[Dict]:
+    """Gọi API story-service để tạo story mới"""
+    service_url = service_url or STORY_SERVICE_URL
+    user_id = user_id or STORY_SERVICE_USER_ID
+    url = f"{service_url}/api/story"
+    headers = {
+        "Content-Type": "application/json",
+        "X-User-Id": user_id
+    }
+    payload = {
+        "title": title,
+        "description": description or "",
+        "genres": genres or [],
+        "coverImageId": cover_image_id,
+        "paid": False,
+        "price": 0
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+        story_data = response.json()
+        print(f"✓ Đã tạo story: {story_data.get('id')} - {story_data.get('title')}")
+        return story_data
+    except Exception as e:
+        print(f"✗ Lỗi khi tạo story: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"  Response: {e.response.text}")
+        return None
+
+def create_chapter_via_api(story_id: int, chapter_number: int, title: str, image_ids: List[str],
+                           service_url: str = None, user_id: str = None) -> Optional[Dict]:
+    """Gọi API story-service để tạo chapter mới"""
+    service_url = service_url or STORY_SERVICE_URL
+    user_id = user_id or STORY_SERVICE_USER_ID
+    url = f"{service_url}/api/story/{story_id}/chapters"
+    headers = {
+        "Content-Type": "application/json",
+        "X-User-Id": user_id
+    }
+    payload = {
+        "chapterNumber": int(chapter_number) if chapter_number == int(chapter_number) else chapter_number,
+        "title": title,
+        "imageIds": image_ids
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+        chapter_data = response.json()
+        print(f"  ✓ Đã tạo chapter {chapter_number}: {chapter_data.get('id')}")
+        return chapter_data
+    except Exception as e:
+        print(f"  ✗ Lỗi khi tạo chapter {chapter_number}: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"    Response: {e.response.text}")
+        return None
+
+def get_db_connection():
+    """Kết nối đến PostgreSQL database story_db"""
+    if not PSYCOPG2_AVAILABLE:
+        return None
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
+        )
+        return conn
+    except Exception as e:
+        print(f"✗ Lỗi kết nối database: {e}")
+        return None
+
+def create_story_in_db(title: str, description: str, genres: List[str], cover_image_id: str, 
+                      author: str = None) -> Optional[int]:
+    """Lưu story trực tiếp vào database PostgreSQL"""
+    if not PSYCOPG2_AVAILABLE:
+        return None
+    
+    conn = get_db_connection()
+    if not conn:
+        return None
+    
+    try:
+        cursor = conn.cursor()
+        genres_str = ",".join(genres) if genres else None
+        author = author or STORY_SERVICE_USER_ID
+        now = datetime.now()
+        
+        # Insert vào bảng stories
+        cursor.execute("""
+            INSERT INTO stories (title, description, genres, cover_image_id, author, is_paid, price, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (title, description, genres_str, cover_image_id, author, False, 0, now, now))
+        
+        story_id = cursor.fetchone()[0]
+        conn.commit()
+        print(f"✓ Đã lưu story vào database: ID={story_id} - {title}")
+        return story_id
+    except Exception as e:
+        conn.rollback()
+        print(f"✗ Lỗi khi lưu story vào database: {e}")
+        return None
+    finally:
+        cursor.close()
+        conn.close()
+
+def create_chapter_in_db(story_id: int, chapter_number: int, title: str, image_ids: List[str]) -> Optional[int]:
+    """Lưu chapter trực tiếp vào database PostgreSQL"""
+    if not PSYCOPG2_AVAILABLE:
+        return None
+    
+    conn = get_db_connection()
+    if not conn:
+        return None
+    
+    try:
+        cursor = conn.cursor()
+        image_ids_str = ",".join(image_ids) if image_ids else None
+        now = datetime.now()
+        
+        # Kiểm tra xem chapter đã tồn tại chưa
+        cursor.execute("""
+            SELECT id FROM chapters 
+            WHERE story_id = %s AND chapter_number = %s
+        """, (story_id, int(chapter_number)))
+        
+        existing = cursor.fetchone()
+        if existing:
+            # Update chapter đã tồn tại
+            cursor.execute("""
+                UPDATE chapters 
+                SET title = %s, image_ids = %s, updated_at = %s
+                WHERE id = %s
+            """, (title, image_ids_str, now, existing[0]))
+            chapter_id = existing[0]
+            print(f"  ✓ Đã cập nhật chapter {chapter_number}: ID={chapter_id}")
+        else:
+            # Insert chapter mới
+            cursor.execute("""
+                INSERT INTO chapters (story_id, chapter_number, title, image_ids, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            """, (story_id, int(chapter_number), title, image_ids_str, now))
+            
+            chapter_id = cursor.fetchone()[0]
+            print(f"  ✓ Đã lưu chapter {chapter_number} vào database: ID={chapter_id}")
+        
+        conn.commit()
+        return chapter_id
+    except Exception as e:
+        conn.rollback()
+        print(f"  ✗ Lỗi khi lưu chapter {chapter_number} vào database: {e}")
+        return None
+    finally:
+        cursor.close()
+        conn.close()
+
 def print_comic_summary(comic_data: Dict):
     print("\n--- Thông tin truyện đã crawl ---")
     for key, value in comic_data.items():
@@ -168,7 +350,8 @@ def crawl_comic_chapters(comic_url: str) -> List[Dict]:
     
     return chapters
 
-def crawl_truyen_info(url: str, crawl_chapters: bool = True) -> Optional[Dict]:
+def crawl_truyen_info(url: str, crawl_chapters: bool = True, skip_api: bool = False,
+                      service_url: str = None, user_id: str = None, use_db: bool = False) -> Optional[Dict]:
     slug = slugify(url.split("/")[-1])
     save_directory = os.path.join(PUBLIC_IMAGES_ROOT, slug)
     os.makedirs(save_directory, exist_ok=True)
@@ -221,31 +404,108 @@ def crawl_truyen_info(url: str, crawl_chapters: bool = True) -> Optional[Dict]:
         if likes:
             comic_data["Lượt thích"] = likes
 
+        # Tạo story trong database TRƯỚC khi crawl chapters (để có thể lưu từng chapter ngay)
+        story_id = None
+        service_url = service_url or STORY_SERVICE_URL
+        user_id = user_id or STORY_SERVICE_USER_ID
+        
+        if not skip_api:
+            if use_db and PSYCOPG2_AVAILABLE:
+                # Lưu trực tiếp vào database PostgreSQL
+                print("\n--- Đang tạo story trong database story_db ---")
+                story_id = create_story_in_db(
+                    title=title,
+                    description=status or "",
+                    genres=genres,
+                    cover_image_id=cover_relative,
+                    author=user_id
+                )
+                
+                if story_id:
+                    comic_data["Story ID"] = story_id
+                    print(f"✓ Đã tạo story ID={story_id} trong database, bắt đầu crawl chapters...")
+                else:
+                    print("⚠ Không thể tạo story trong database, thử qua API...")
+                    use_db = False  # Fallback to API
+            
+            if not use_db or not story_id:
+                # Lưu qua API story-service
+                print("\n--- Đang tạo story qua API story-service ---")
+                story_response = create_story_via_api(
+                    title=title,
+                    description=status or "",
+                    genres=genres,
+                    cover_image_id=cover_relative,
+                    service_url=service_url,
+                    user_id=user_id
+                )
+                
+                if story_response:
+                    story_id = story_response.get("id")
+                    comic_data["Story ID"] = story_id
+                    print(f"✓ Đã tạo story ID={story_id} qua API, bắt đầu crawl chapters...")
+                else:
+                    print("⚠ Không thể tạo story qua API, chỉ lưu file local (không lưu vào database)")
+
+        # Crawl chapters và lưu vào database NGAY SAU MỖI CHAPTER
         chapters_data: List[Dict] = []
         if crawl_chapters:
             chapters = crawl_comic_chapters(url)
-            for chapter in chapters:
+            total_chapters = len(chapters)
+            print(f"\n--- Bắt đầu crawl {total_chapters} chapters ---")
+            
+            for idx, chapter in enumerate(chapters, start=1):
                 chapter_number = chapter["chapter_number"]
+                chapter_title = chapter["title"]
+                print(f"\n[{idx}/{total_chapters}] Đang crawl chương {chapter_number}: {chapter_title}")
+                
                 # Sử dụng số chương trực tiếp (không có prefix "chapter_") để khớp với story-service
                 chapter_num_str = str(int(chapter_number)) if chapter_number == int(chapter_number) else str(chapter_number)
                 chapter_dir = os.path.join(save_directory, chapter_num_str)
                 image_paths = download_chapter_images(chapter["url"], chapter_dir)
+                
                 # Tạo URL paths để khớp với story-service: /public/images/{slug}/{chapterNumber}/{filename}
                 image_rel_paths = []
-                for idx, path in enumerate(image_paths, start=1):
+                for path_idx, path in enumerate(image_paths, start=1):
                     filename = os.path.basename(path)
                     url_path = f"/public/images/{slug}/{chapter_num_str}/{filename}"
                     image_rel_paths.append(url_path)
-                chapters_data.append({
+                
+                chapter_info = {
                     "Số chương": chapter_number,
-                    "Tiêu đề": chapter["title"],
+                    "Tiêu đề": chapter_title,
                     "URL": chapter["url"],
                     "Thư mục": os.path.relpath(chapter_dir, WEB_ROOT) if os.path.isabs(chapter_dir) else chapter_dir,
                     "Ảnh đã tải": image_rel_paths
-                })
+                }
+                chapters_data.append(chapter_info)
+                
+                # Lưu chapter vào database NGAY SAU KHI crawl xong
+                if story_id and not skip_api:
+                    if use_db and PSYCOPG2_AVAILABLE:
+                        create_chapter_in_db(
+                            story_id=story_id,
+                            chapter_number=chapter_number,
+                            title=chapter_title,
+                            image_ids=image_rel_paths
+                        )
+                    else:
+                        create_chapter_via_api(
+                            story_id=story_id,
+                            chapter_number=chapter_number,
+                            title=chapter_title,
+                            image_ids=image_rel_paths,
+                            service_url=service_url,
+                            user_id=user_id
+                        )
+                    print(f"  ✓ Đã lưu chương {chapter_number} vào database")
+                else:
+                    print(f"  ✓ Đã crawl chương {chapter_number} ({len(image_rel_paths)} ảnh)")
 
         if chapters_data:
             comic_data["Danh sách chương"] = chapters_data
+            if story_id:
+                print(f"\n✓ Hoàn tất crawl {len(chapters_data)} chapters cho story ID={story_id}")
 
         info_path = os.path.join(save_directory, "info.json")
         try:
@@ -274,10 +534,56 @@ def parse_args():
         action="store_true",
         help="Bỏ qua việc tải ảnh các chương"
     )
+    parser.add_argument(
+        "--skip-api",
+        action="store_true",
+        help="Bỏ qua việc gọi API story-service (chỉ crawl và lưu file)"
+    )
+    parser.add_argument(
+        "--user-id",
+        default=STORY_SERVICE_USER_ID,
+        help=f"User ID để tạo story (mặc định: {STORY_SERVICE_USER_ID})"
+    )
+    parser.add_argument(
+        "--story-service-url",
+        default=STORY_SERVICE_URL,
+        help=f"URL của story-service (mặc định: {STORY_SERVICE_URL})"
+    )
+    parser.add_argument(
+        "--use-db",
+        action="store_true",
+        help="Lưu trực tiếp vào database PostgreSQL thay vì qua API"
+    )
+    parser.add_argument(
+        "--db-host",
+        default=DB_HOST,
+        help=f"PostgreSQL host (mặc định: {DB_HOST})"
+    )
+    parser.add_argument(
+        "--db-port",
+        default=DB_PORT,
+        help=f"PostgreSQL port (mặc định: {DB_PORT})"
+    )
+    parser.add_argument(
+        "--db-name",
+        default=DB_NAME,
+        help=f"Database name (mặc định: {DB_NAME})"
+    )
+    parser.add_argument(
+        "--db-user",
+        default=DB_USER,
+        help=f"Database user (mặc định: {DB_USER})"
+    )
+    parser.add_argument(
+        "--db-password",
+        default=DB_PASSWORD,
+        help=f"Database password (mặc định: {DB_PASSWORD})"
+    )
     return parser.parse_args()
 
 
 def main():
+    global STORY_SERVICE_URL, STORY_SERVICE_USER_ID, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
     args = parse_args()
     url = args.url
 
@@ -285,14 +591,39 @@ def main():
         print("Vui lòng cung cấp URL truyện bằng tham số --url.", file=sys.stderr)
         sys.exit(1)
 
+    # Cập nhật config từ args
+    STORY_SERVICE_URL = args.story_service_url
+    STORY_SERVICE_USER_ID = args.user_id
+    DB_HOST = args.db_host
+    DB_PORT = args.db_port
+    DB_NAME = args.db_name
+    DB_USER = args.db_user
+    DB_PASSWORD = args.db_password
+
     print(f"Bắt đầu crawl truyện từ URL: {url}")
-    data = crawl_truyen_info(url, crawl_chapters=not args.skip_chapters)
+    if args.use_db:
+        print(f"Database: {DB_HOST}:{DB_PORT}/{DB_NAME} (user: {DB_USER})")
+    else:
+        print(f"Story Service URL: {STORY_SERVICE_URL}")
+        print(f"User ID: {STORY_SERVICE_USER_ID}")
+    if args.skip_api:
+        print("⚠ Bỏ qua việc lưu vào database (--skip-api)")
+    
+    data = crawl_truyen_info(
+        url, 
+        crawl_chapters=not args.skip_chapters, 
+        skip_api=args.skip_api,
+        service_url=STORY_SERVICE_URL,
+        user_id=STORY_SERVICE_USER_ID,
+        use_db=args.use_db
+    )
 
     if data:
+        
         print_comic_summary(data)
         info_path = data.get("Thông tin lưu")
         if info_path:
-            print(f"File thông tin: {info_path}")
+            print(f"\nFile thông tin: {info_path}")
         sys.exit(0)
 
     print("Không thể crawl dữ liệu từ URL đã cho.", file=sys.stderr)

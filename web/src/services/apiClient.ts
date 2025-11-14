@@ -34,10 +34,12 @@ export const endpoints = {
 	history: () => '/api/user/history',
 
 	// Story Service
-	stories: (q?: string) => (q ? `/story/search?q=${encodeURIComponent(q)}` : '/story/top'),
-	storyDetail: (id: string) => `/story/${id}`,
-	chapters: (storyId: string) => `/story/${storyId}/chapters`,
-	chapterContent: (storyId: string, chapterId: string) => `/story/${storyId}/chapters/${chapterId}`,
+	stories: () => '/api/story',
+	storyDetail: (id: string) => `/api/story/${id}`,
+	chapters: (storyId: string) => `/api/story/${storyId}/chapters`,
+	chapterById: (chapterId: string) => `/api/story/chapters/${chapterId}`,
+	chapterContent: (storyId: string, chapterId: string) => `/api/story/${storyId}/chapters/${chapterId}`,
+	searchStories: (q: string) => `/api/story/search?title=${encodeURIComponent(q)}`,
 
 	// Comment & Rating Service
 	comments: (storyId: string, chapterId: string) => `/comment/${storyId}/${chapterId}`,
