@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Flame, Layers, Lock, Sparkles, Star, Users } from 'lucide-react';
+import { Flame, Layers, Lock, Sparkles, Star, Users, Trash2 } from 'lucide-react';
 
 import { CheckoutModal } from '@/components/payments/CheckoutModal';
 import { usePremiumStore } from '@/shared/stores/premiumStore';
-import { getComments, MockComment } from '@/shared/mocks';
 import { api, endpoints } from '@/services/apiClient';
+import { useAuth } from '@/providers/AuthProvider';
+import type { CommentResponse, CommentRequest, CommentWithUser } from '@/types/comment';
+import type { UserInfo } from '@/types/user';
 
 type Chapter = { id: string | number; name: string; index?: number; chapterNumber?: number };
 type Story = {
@@ -67,12 +69,18 @@ export default function StoryDetailPage() {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [commentPage, setCommentPage] = useState(1);
-	const [comments, setComments] = useState<MockComment[]>([]);
+	const [comments, setComments] = useState<CommentWithUser[]>([]);
 	const [totalComments, setTotalComments] = useState(0);
 	const [newComment, setNewComment] = useState('');
+	const [commentLoading, setCommentLoading] = useState(false);
+	const [commentError, setCommentError] = useState<string | null>(null);
+	const [submittingComment, setSubmittingComment] = useState(false);
+	const [userInfoCache, setUserInfoCache] = useState<Map<number, UserInfo>>(new Map());
+	const [deletingCommentId, setDeletingCommentId] = useState<number | null>(null);
 	const openCheckout = usePremiumStore((state) => state.openCheckout);
 	const purchases = usePremiumStore((state) => state.purchases);
 	const purchaseRecord = storyId ? purchases[storyId as string] : undefined;
+	const { user, isAuthenticated } = useAuth();
 
 	// Load story details from API
 	useEffect(() => {
@@ -132,11 +140,114 @@ export default function StoryDetailPage() {
 		loadStory();
 	}, [storyId]);
 
+	// Load comments from API
 	useEffect(() => {
 		if (!storyId) return;
-		const { items, total } = getComments(storyId, commentPage, 5);
-		setComments(items);
-		setTotalComments(total);
+
+		const loadComments = async () => {
+			try {
+				setCommentLoading(true);
+				setCommentError(null);
+
+				// Get root comments by story ID (comments without chapterId or parentId)
+				const response = await api.get<CommentResponse[]>(endpoints.getRootCommentsByStory(storyId));
+				
+				// Handle ResponseEntity wrapper if present
+				const commentsData = Array.isArray(response.data) ? response.data : (response.data as any)?.data || [];
+
+				// Filter out deleted/blocked comments
+				const activeComments = commentsData.filter((comment: CommentResponse) => {
+					// Note: The API might return isDeleted field, but CommentResponse doesn't include it
+					// We'll assume all returned comments are active
+					return true;
+				});
+
+				// Simple pagination (client-side for now)
+				const pageSize = 5;
+				const start = (commentPage - 1) * pageSize;
+				const end = start + pageSize;
+				const paginatedComments = activeComments.slice(start, end);
+
+				// Load user info for each comment
+				const currentCache = userInfoCache;
+				const commentsWithUser: CommentWithUser[] = await Promise.all(
+					paginatedComments.map(async (comment: CommentResponse) => {
+						// Check cache first
+						if (currentCache.has(comment.userId)) {
+							const cachedUser = currentCache.get(comment.userId)!;
+							return {
+								...comment,
+								user: {
+									username: cachedUser.username,
+									avatarUrl: cachedUser.avatarUrl,
+								},
+							};
+						}
+
+						// Load user info
+						try {
+							const userResponse = await api.get<UserInfo>(endpoints.getUserById(comment.userId));
+							const userData = userResponse.data;
+							
+							// Update cache
+							setUserInfoCache((prev) => {
+								const newCache = new Map(prev);
+								newCache.set(comment.userId, userData);
+								return newCache;
+							});
+							
+							return {
+								...comment,
+								user: {
+									username: userData.username,
+									avatarUrl: userData.avatarUrl,
+								},
+							};
+						} catch (err) {
+							console.error(`Failed to load user info for userId ${comment.userId}:`, err);
+							return {
+								...comment,
+								user: {
+									username: `User ${comment.userId}`,
+									avatarUrl: null,
+								},
+							};
+						}
+					})
+				);
+
+				setComments(commentsWithUser);
+				setTotalComments(activeComments.length);
+			} catch (err: any) {
+				console.error('Error loading comments:', err);
+				console.error('Error details:', {
+					message: err.message,
+					code: err.code,
+					response: err.response,
+					request: err.config?.url,
+				});
+				
+				let errorMessage = 'Không thể tải bình luận. Vui lòng thử lại sau.';
+				
+				if (err.code === 'ERR_NETWORK' || err.message === 'Network Error') {
+					errorMessage = 'Không thể kết nối đến server. Vui lòng kiểm tra:\n- API Gateway có đang chạy không (port 8081)\n- Comment Service có đang chạy không (port 8883)\n- Kiểm tra Console để xem chi tiết lỗi';
+				} else if (err.response) {
+					errorMessage = err.response.data?.message 
+						|| err.response.data?.error 
+						|| `Lỗi ${err.response.status}: ${err.response.statusText}`;
+				} else if (err.message) {
+					errorMessage = err.message;
+				}
+				
+				setCommentError(errorMessage);
+				setComments([]);
+				setTotalComments(0);
+			} finally {
+				setCommentLoading(false);
+			}
+		};
+
+		loadComments();
 	}, [storyId, commentPage]);
 
 	const commentPages = useMemo(() => Math.max(1, Math.ceil(totalComments / 5)), [totalComments]);
@@ -154,18 +265,147 @@ export default function StoryDetailPage() {
 		});
 	};
 
-	const canRead = !story?.isPremium || hasAccess;
+		const canRead = !story?.isPremium || hasAccess;
 
-	const handleAddComment = () => {
-		if (!storyId || !newComment.trim()) return;
-		const newItem: MockComment = {
-			id: `${storyId}-c-new-${Date.now()}`,
-			user: 'Bạn',
-			content: newComment.trim(),
-			createdAt: new Date().toISOString(),
-		};
-		setComments((prev) => [newItem, ...prev]);
-		setNewComment('');
+	// Get current user ID
+	const getCurrentUserId = (): number | null => {
+		if (!user || !isAuthenticated) return null;
+		
+		if ('id' in user) {
+			// Email user
+			const userId = parseInt(user.id, 10);
+			return isNaN(userId) ? null : userId;
+		} else if (user.profile?.sub) {
+			// OAuth user
+			const userId = parseInt(user.profile.sub, 10);
+			return isNaN(userId) ? null : userId;
+		}
+		return null;
+	};
+
+	// Check if comment can be deleted (within 5 minutes and is user's comment)
+	const canDeleteComment = (comment: CommentWithUser): boolean => {
+		const currentUserId = getCurrentUserId();
+		if (!currentUserId || comment.userId !== currentUserId) return false;
+		
+		const commentDate = new Date(comment.createdAt);
+		const now = new Date();
+		const diffMinutes = (now.getTime() - commentDate.getTime()) / (1000 * 60);
+		
+		return diffMinutes <= 5;
+	};
+
+	// Handle delete comment
+	const handleDeleteComment = async (commentId: number) => {
+		if (!confirm('Bạn có chắc chắn muốn xóa bình luận này?')) {
+			return;
+		}
+
+		const currentUserId = getCurrentUserId();
+		if (!currentUserId) {
+			alert('Bạn cần đăng nhập để xóa bình luận');
+			return;
+		}
+
+		try {
+			setDeletingCommentId(commentId);
+			await api.put(endpoints.deleteComment(commentId.toString()), {
+				userId: currentUserId
+			});
+			
+			// Remove comment from list
+			setComments((prev) => prev.filter((c) => c.id !== commentId));
+			setTotalComments((prev) => Math.max(0, prev - 1));
+		} catch (err: any) {
+			console.error('Error deleting comment:', err);
+			// Backend trả về error trong response.data.error
+			const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Không thể xóa bình luận. Vui lòng thử lại sau.';
+			alert(errorMessage);
+		} finally {
+			setDeletingCommentId(null);
+		}
+	};
+
+	const handleAddComment = async () => {
+		if (!storyId || !newComment.trim() || !isAuthenticated || !user) {
+			if (!isAuthenticated) {
+				alert('Vui lòng đăng nhập để bình luận');
+			}
+			return;
+		}
+
+		// Get userId from user object
+		let userId: number;
+		if ('id' in user) {
+			// Email user
+			userId = parseInt(user.id, 10);
+		} else if (user.profile?.sub) {
+			// OAuth user
+			userId = parseInt(user.profile.sub, 10);
+		} else {
+			console.error('Cannot get userId from user object');
+			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			return;
+		}
+
+		if (isNaN(userId)) {
+			console.error('Invalid userId:', user);
+			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			return;
+		}
+
+		try {
+			setSubmittingComment(true);
+
+			const commentRequest: CommentRequest = {
+				storyId: parseInt(storyId, 10),
+				chapterId: null, // Root comment for story
+				userId: userId,
+				parentId: null, // Root comment
+				content: newComment.trim(),
+			};
+
+			const response = await api.post<CommentResponse>(endpoints.createComment(), commentRequest);
+			const newCommentData = response.data;
+
+			// Load user info for new comment
+			try {
+				const userResponse = await api.get<UserInfo>(endpoints.getUserById(newCommentData.userId));
+				const userData = userResponse.data;
+				
+				// Update cache
+				setUserInfoCache((prev) => new Map(prev).set(newCommentData.userId, userData));
+				
+				// Add new comment to the list with user info
+				const commentWithUser: CommentWithUser = {
+					...newCommentData,
+					user: {
+						username: userData.username,
+						avatarUrl: userData.avatarUrl,
+					},
+				};
+				setComments((prev) => [commentWithUser, ...prev]);
+			} catch (err) {
+				console.error('Failed to load user info for new comment:', err);
+				// Add comment without user info
+				const commentWithUser: CommentWithUser = {
+					...newCommentData,
+					user: {
+						username: `User ${newCommentData.userId}`,
+						avatarUrl: null,
+					},
+				};
+				setComments((prev) => [commentWithUser, ...prev]);
+			}
+			setTotalComments((prev) => prev + 1);
+			setNewComment('');
+		} catch (err: any) {
+			console.error('Error creating comment:', err);
+			const errorMessage = err.response?.data?.message || err.message || 'Không thể gửi bình luận. Vui lòng thử lại sau.';
+			alert(errorMessage);
+		} finally {
+			setSubmittingComment(false);
+		}
 	};
 
 	if (!storyId) return null;
@@ -415,26 +655,95 @@ export default function StoryDetailPage() {
 							/>
 							<div className="flex justify-end">
 								<button
-									className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
+									className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
 									onClick={handleAddComment}
+									disabled={submittingComment || !isAuthenticated}
 								>
-									<Users size={14} />
-									Gửi bình luận
+									{submittingComment ? (
+										<>
+											<div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+											Đang gửi...
+										</>
+									) : (
+										<>
+											<Users size={14} />
+											Gửi bình luận
+										</>
+									)}
 								</button>
 							</div>
 						</div>
+						{commentError && (
+							<div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400">
+								{commentError}
+							</div>
+						)}
 						<div className="mt-6 space-y-4">
-							{comments.map((comment) => (
-								<div key={comment.id} className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-									<div className="flex items-center justify-between">
-										<p className="text-sm font-semibold text-zinc-800 dark:text-white">{comment.user}</p>
-										<p className="text-xs text-zinc-500">
-											{new Date(comment.createdAt).toLocaleString('vi-VN')}
-										</p>
+							{commentLoading ? (
+								<div className="flex items-center justify-center py-8">
+									<div className="text-center">
+										<div className="inline-block h-6 w-6 animate-spin rounded-full border-4 border-solid border-brand border-r-transparent"></div>
+										<p className="mt-2 text-xs text-zinc-500">Đang tải bình luận...</p>
 									</div>
-									<p className="mt-2 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-300">{comment.content}</p>
 								</div>
-							))}
+							) : comments.length === 0 ? (
+								<div className="py-8 text-center text-sm text-zinc-500">
+									Chưa có bình luận nào. Hãy là người đầu tiên bình luận!
+								</div>
+							) : (
+								comments.map((comment) => {
+									const canDelete = canDeleteComment(comment);
+									const isDeleting = deletingCommentId === comment.id;
+									
+									return (
+										<div key={comment.id} className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+											<div className="flex items-start justify-between gap-3">
+												<div className="flex items-center gap-3 flex-1">
+													{comment.user?.avatarUrl ? (
+														<img
+															src={comment.user.avatarUrl}
+															alt={comment.user.username}
+															className="h-10 w-10 rounded-full object-cover"
+														/>
+													) : (
+														<div className="h-10 w-10 rounded-full bg-brand/20 flex items-center justify-center text-brand font-semibold text-sm">
+															{comment.user?.username?.charAt(0).toUpperCase() || 'U'}
+														</div>
+													)}
+													<div className="flex-1">
+														<div className="flex items-center gap-2">
+															<p className="text-sm font-semibold text-zinc-800 dark:text-white">
+																{comment.user?.username || `User ${comment.userId}`}
+															</p>
+															{canDelete && (
+																<button
+																	onClick={() => handleDeleteComment(comment.id)}
+																	disabled={isDeleting}
+																	className="ml-auto text-xs text-red-500 hover:text-red-700 disabled:opacity-50 flex items-center gap-1"
+																	title="Xóa bình luận (chỉ trong 5 phút đầu)"
+																>
+																	{isDeleting ? (
+																		<div className="h-3 w-3 animate-spin rounded-full border-2 border-red-500 border-t-transparent"></div>
+																	) : (
+																		<Trash2 size={14} />
+																	)}
+																	<span>Xóa</span>
+																</button>
+															)}
+														</div>
+														<p className="text-xs text-zinc-500">
+															{new Date(comment.createdAt).toLocaleString('vi-VN')}
+														</p>
+													</div>
+												</div>
+											</div>
+											<p className="mt-3 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-300">
+												{comment.content}
+											</p>
+										</div>
+									);
+								})
+							)}
 						</div>
 						<div className="mt-4 flex items-center justify-center gap-2">
 							<button

@@ -60,7 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			if (token && storedUser) {
 				try {
 					const emailUser: EmailUser = JSON.parse(storedUser);
-					// Set token in API client
+					// Set token in API client - ensure it's set for all requests
 					api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 					setUser(emailUser);
 					setIsLoading(false);
