@@ -1,7 +1,10 @@
+import axios from 'axios';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type PaymentMethod = 'card' | 'momo' | 'vnpay';
+import { api, endpoints } from '@/services/apiClient';
+
+export type PaymentMethod = 'vnpay';
 
 export type CheckoutStory = {
 	id: string;
@@ -23,7 +26,7 @@ type PremiumState = {
 	error?: string;
 	openCheckout: (story: CheckoutStory) => void;
 	closeCheckout: () => void;
-	purchaseStory: (payload: { method: PaymentMethod; cardholder?: string; cardNumber?: string; email?: string }) => Promise<void>;
+	purchaseStory: (payload: { method: PaymentMethod }) => Promise<void>;
 	hasAccess: (storyId: string) => boolean;
 };
 
@@ -47,24 +50,39 @@ export const usePremiumStore = create<PremiumState>()(
 					return;
 				}
 
+				const storyId = Number(checkoutStory.id);
+				if (!Number.isFinite(storyId) || storyId <= 0) {
+					set({ error: 'ID truyện không hợp lệ.', isProcessing: false });
+					return;
+				}
+
 				set({ isProcessing: true, error: undefined });
 
-				// Giả lập gọi API tới cổng thanh toán
-				await new Promise((resolve) => setTimeout(resolve, 1600));
+				try {
+					await api.post(endpoints.paymentPurchaseStory(), {
+						storyId,
+						price: checkoutStory.price,
+					});
 
-				set((state) => ({
-					purchases: {
-						...state.purchases,
-						[checkoutStory.id]: {
-							storyId: checkoutStory.id,
-							price: checkoutStory.price,
-							method,
-							purchasedAt: new Date().toISOString(),
+					set((state) => ({
+						purchases: {
+							...state.purchases,
+							[checkoutStory.id]: {
+								storyId: checkoutStory.id,
+								price: checkoutStory.price,
+								method,
+								purchasedAt: new Date().toISOString(),
+							},
 						},
-					},
-					checkoutStory: undefined,
-					isProcessing: false,
-				}));
+						checkoutStory: undefined,
+						isProcessing: false,
+					}));
+				} catch (error) {
+					const message = axios.isAxiosError(error)
+						? error.response?.data?.message || error.response?.data?.error || 'Thanh toán thất bại, vui lòng thử lại.'
+						: 'Thanh toán thất bại, vui lòng thử lại.';
+					set({ error: message, isProcessing: false });
+				}
 			},
 			hasAccess(storyId) {
 				return Boolean(get().purchases[storyId]);

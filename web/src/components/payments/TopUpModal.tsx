@@ -1,17 +1,12 @@
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, PiggyBank, Smartphone, Wallet, X } from 'lucide-react';
+import { Loader2, PiggyBank, Smartphone, X } from 'lucide-react';
 
 import { useWalletStore } from '@/shared/stores/walletStore';
 import type { PaymentMethod } from '@/shared/stores/premiumStore';
 
 const AMOUNTS = [50000, 100000, 200000, 500000];
-
-const paymentMethods: { method: PaymentMethod; label: string; icon: JSX.Element }[] = [
-	{ method: 'card', label: 'Thẻ quốc tế', icon: <Wallet className="h-4 w-4" /> },
-	{ method: 'momo', label: 'Momo', icon: <Smartphone className="h-4 w-4" /> },
-	{ method: 'vnpay', label: 'VNPay', icon: <Smartphone className="h-4 w-4" /> },
-];
+const DEFAULT_METHOD: PaymentMethod = 'vnpay';
 
 export function TopUpModal() {
 	const { isOpen, close, topUp, isProcessing, error, balance, resetError } = useWalletStore((state) => ({
@@ -24,7 +19,6 @@ export function TopUpModal() {
 		resetError: state.resetError,
 	}));
 	const [amount, setAmount] = useState(AMOUNTS[1]);
-	const [method, setMethod] = useState<PaymentMethod>('card');
 	const [customAmount, setCustomAmount] = useState('');
 
 	const formatCurrency = useMemo(
@@ -57,11 +51,10 @@ export function TopUpModal() {
 		event.preventDefault();
 		await topUp({
 			amount: currentAmount,
-			method,
+			method: DEFAULT_METHOD,
 		});
 		setCustomAmount('');
 		setAmount(AMOUNTS[1]);
-		setMethod('card');
 	};
 
 	const modalContent = (
@@ -130,31 +123,15 @@ export function TopUpModal() {
 						</p>
 					</div>
 
-					<div>
-						<p className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">Phương thức thanh toán</p>
-						<div className="mt-3 grid gap-2 sm:grid-cols-3">
-							{paymentMethods.map((item) => {
-								const active = method === item.method;
-								return (
-									<button
-										type="button"
-										key={item.method}
-										onClick={() => {
-											resetError();
-											setMethod(item.method);
-										}}
-										className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition ${
-											active
-												? 'border-brand bg-brand/10 text-brand'
-												: 'border-zinc-200 text-zinc-500 hover:border-brand/40 hover:text-brand dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-brand/50'
-										}`}
-										disabled={isProcessing}
-									>
-										{item.icon}
-										<span>{item.label}</span>
-									</button>
-								);
-							})}
+					<div className="rounded-2xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+						<div className="flex items-center gap-3">
+							<Smartphone className="h-5 w-5 text-brand" />
+							<div>
+								<p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Thanh toán qua VNPay</p>
+								<p className="text-xs text-zinc-500 dark:text-zinc-400">
+									Truyền hướng trực tiếp đến cổng VNPay sau khi bạn bấm “Nạp tiền”.
+								</p>
+							</div>
 						</div>
 					</div>
 

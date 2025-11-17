@@ -51,6 +51,7 @@ export const endpoints = {
 	getUserById: (userId: string | number) => `/api/user/${userId}`,
 	bookmarks: () => '/api/user/bookmarks',
 	history: () => '/api/user/history',
+	balance: () => '/api/user/balance',
 
 	// Story Service
 	stories: () => '/api/story',
@@ -73,6 +74,12 @@ export const endpoints = {
 
 	// Search & Recommendation
 	recommend: () => '/recommend',
+
+	// Payment Service
+	paymentDeposit: () => '/api/payment/deposit',
+	paymentPurchaseStory: () => '/api/payment/purchase-story',
+	paymentHistory: () => '/api/payment/user/history',
+	paymentTransaction: (transactionId: string) => `/api/payment/transaction/${transactionId}`,
 };
 
 

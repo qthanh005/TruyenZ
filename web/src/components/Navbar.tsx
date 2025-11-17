@@ -37,6 +37,8 @@ export function Navbar() {
 	const mobileMenuRef = useRef<HTMLDivElement | null>(null);
 	const openTopUp = useWalletStore((state) => state.open);
 	const walletBalance = useWalletStore((state) => state.balance);
+	const syncBalance = useWalletStore((state) => state.syncBalance);
+	const confirmLastTopUp = useWalletStore((state) => state.confirmLastTopUp);
 	const formattedBalance = useMemo(
 		() =>
 			new Intl.NumberFormat('vi-VN', {
@@ -107,6 +109,12 @@ export function Navbar() {
         }
         return () => document.removeEventListener('mousedown', onDocClick);
     }, [openMobileMenu]);
+
+	useEffect(() => {
+		if (!isAuthenticated) return;
+		syncBalance();
+		confirmLastTopUp();
+	}, [isAuthenticated, syncBalance, confirmLastTopUp]);
 
 	return (
 		<header className="sticky top-0 z-40 w-full border-b border-zinc-200/60 bg-white/70 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/70">
