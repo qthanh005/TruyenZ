@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Flame, Layers, Sparkles, Star } from 'lucide-react';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, CheckCircle, Flame, Layers, Sparkles, Star, XCircle } from 'lucide-react';
 import { api, endpoints } from '@/services/apiClient';
+import { useWalletStore } from '@/shared/stores/walletStore';
 
 type Story = {
 	id: string | number;
@@ -72,6 +73,11 @@ export default function HomePage() {
 	const [newStories, setNewStories] = useState<Story[]>([]);
 	const [hotStories, setHotStories] = useState<Story[]>([]);
 	const [loading, setLoading] = useState(true);
+	const [searchParams, setSearchParams] = useSearchParams();
+	const navigate = useNavigate();
+	const { syncBalance } = useWalletStore();
+	const paymentStatus = searchParams.get('paymentStatus');
+	const txnRef = searchParams.get('txnRef');
 
 	// Load stories from story-service
 	useEffect(() => {
@@ -119,6 +125,23 @@ export default function HomePage() {
 		return () => clearInterval(interval);
 	}, [autoPlay, heroStories.length]);
 
+	// Handle payment status from VNPay callback
+	useEffect(() => {
+		if (paymentStatus === 'success') {
+			// Sync balance when payment succeeds
+			syncBalance();
+			// Remove query params after 5 seconds
+			setTimeout(() => {
+				setSearchParams({}, { replace: true });
+			}, 5000);
+		} else if (paymentStatus === 'failed') {
+			// Remove query params after 5 seconds
+			setTimeout(() => {
+				setSearchParams({}, { replace: true });
+			}, 5000);
+		}
+	}, [paymentStatus, syncBalance, setSearchParams]);
+
 	const heroActive = useMemo(() => heroStories[slide], [slide, heroStories]);
 
 	const formatPrice = (price?: number) =>
@@ -137,6 +160,32 @@ export default function HomePage() {
 
 	return (
 		<div className="space-y-12">
+			{/* Payment Status Notification */}
+			{paymentStatus && (
+				<div className={`fixed left-1/2 top-4 z-50 -translate-x-1/2 transform rounded-lg border px-4 py-3 shadow-lg transition-all ${
+					paymentStatus === 'success'
+						? 'border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400'
+						: 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400'
+				}`}>
+					<div className="flex items-center gap-2">
+						{paymentStatus === 'success' ? (
+							<>
+								<CheckCircle className="h-5 w-5" />
+								<span className="font-semibold">Nạp tiền thành công!</span>
+							</>
+						) : (
+							<>
+								<XCircle className="h-5 w-5" />
+								<span className="font-semibold">Nạp tiền thất bại</span>
+							</>
+						)}
+					</div>
+					{txnRef && (
+						<p className="mt-1 text-xs opacity-75">Mã giao dịch: {txnRef}</p>
+					)}
+				</div>
+			)}
+
 			{heroStories.length > 0 && (
 				<section className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-950 text-white shadow-lg dark:border-zinc-800">
 					<div className="relative h-[420px] w-full md:h-[480px]">

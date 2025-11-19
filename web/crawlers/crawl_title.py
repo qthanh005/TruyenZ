@@ -34,10 +34,10 @@ DEFAULT_HEADERS = {
 STORY_SERVICE_URL = os.getenv("STORY_SERVICE_URL", "http://localhost:8083")
 STORY_SERVICE_USER_ID = os.getenv("STORY_SERVICE_USER_ID", "1")  # Default user ID for crawler
 
-# PostgreSQL Database Configuration (story_db)
+# PostgreSQL Database Configuration (storydb)
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "story_db")
+DB_NAME = os.getenv("DB_NAME", "storydb")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres123")
 
@@ -179,7 +179,7 @@ def create_chapter_via_api(story_id: int, chapter_number: int, title: str, image
         return None
 
 def get_db_connection():
-    """Kết nối đến PostgreSQL database story_db"""
+    """Kết nối đến PostgreSQL database storydb"""
     if not PSYCOPG2_AVAILABLE:
         return None
     try:
@@ -412,7 +412,7 @@ def crawl_truyen_info(url: str, crawl_chapters: bool = True, skip_api: bool = Fa
         if not skip_api:
             if use_db and PSYCOPG2_AVAILABLE:
                 # Lưu trực tiếp vào database PostgreSQL
-                print("\n--- Đang tạo story trong database story_db ---")
+                print("\n--- Đang tạo story trong database storydb ---")
                 story_id = create_story_in_db(
                     title=title,
                     description=status or "",

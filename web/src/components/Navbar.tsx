@@ -23,6 +23,7 @@ import {
 	Mail,
 } from 'lucide-react';
 import { useWalletStore } from '@/shared/stores/walletStore';
+import { NotificationDropdown } from '@/components/notifications/NotificationDropdown';
 
 export function Navbar() {
 	const { current, theme, setTheme } = useTheme();
@@ -169,6 +170,7 @@ export function Navbar() {
 					</button>
 					{isAuthenticated ? (
 						<>
+							<NotificationDropdown />
 							<button
 								className="inline-flex items-center gap-2 rounded-md border border-brand/40 bg-brand/10 px-3 py-1.5 text-sm font-medium text-brand transition hover:-translate-y-0.5 hover:bg-brand/20"
 								onClick={() => openTopUp()}

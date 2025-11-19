@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Flame, Layers, Lock, Sparkles, Star, Users, Trash2 } from 'lucide-react';
+import { Flame, Layers, Lock, Sparkles, Star, Users, Trash2, Reply, X } from 'lucide-react';
 
 import { CheckoutModal } from '@/components/payments/CheckoutModal';
 import { usePremiumStore } from '@/shared/stores/premiumStore';
@@ -68,8 +68,8 @@ export default function StoryDetailPage() {
 	const [chapters, setChapters] = useState<Chapter[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [commentPage, setCommentPage] = useState(1);
 	const [comments, setComments] = useState<CommentWithUser[]>([]);
+	const [allComments, setAllComments] = useState<CommentWithUser[]>([]); // Tất cả comments đã load
 	const [totalComments, setTotalComments] = useState(0);
 	const [newComment, setNewComment] = useState('');
 	const [commentLoading, setCommentLoading] = useState(false);
@@ -77,6 +77,18 @@ export default function StoryDetailPage() {
 	const [submittingComment, setSubmittingComment] = useState(false);
 	const [userInfoCache, setUserInfoCache] = useState<Map<number, UserInfo>>(new Map());
 	const [deletingCommentId, setDeletingCommentId] = useState<number | null>(null);
+	const [replyingToCommentId, setReplyingToCommentId] = useState<number | null>(null);
+	const [replyContent, setReplyContent] = useState('');
+	const [replies, setReplies] = useState<Map<number, CommentWithUser[]>>(new Map());
+	const [nestedReplies, setNestedReplies] = useState<Map<number, CommentWithUser[]>>(new Map()); // Replies của replies
+	const [showReplies, setShowReplies] = useState<Set<number>>(new Set());
+	const [showNestedReplies, setShowNestedReplies] = useState<Set<number>>(new Set()); // Hiển thị nested replies
+	const [loadingReplies, setLoadingReplies] = useState<Set<number>>(new Set());
+	const [replyCounts, setReplyCounts] = useState<Map<number, number>>(new Map());
+	const [nestedReplyCounts, setNestedReplyCounts] = useState<Map<number, number>>(new Map()); // Số lượng nested replies
+	const [replyingToReplyId, setReplyingToReplyId] = useState<number | null>(null); // Đang reply reply nào
+	const [replyToReplyContent, setReplyToReplyContent] = useState(''); // Nội dung reply của reply
+	const [displayedComments, setDisplayedComments] = useState(5); // Số comments hiển thị (infinite scroll)
 	const openCheckout = usePremiumStore((state) => state.openCheckout);
 	const purchases = usePremiumStore((state) => state.purchases);
 	const purchaseRecord = storyId ? purchases[storyId as string] : undefined;
@@ -140,7 +152,7 @@ export default function StoryDetailPage() {
 		loadStory();
 	}, [storyId]);
 
-	// Load comments from API
+	// Load comments from API với cấu trúc phân cấp
 	useEffect(() => {
 		if (!storyId) return;
 
@@ -153,71 +165,64 @@ export default function StoryDetailPage() {
 				const response = await api.get<CommentResponse[]>(endpoints.getRootCommentsByStory(storyId));
 				
 				// Handle ResponseEntity wrapper if present
-				const commentsData = Array.isArray(response.data) ? response.data : (response.data as any)?.data || [];
+				const rootCommentsData = Array.isArray(response.data) ? response.data : (response.data as any)?.data || [];
 
-				// Filter out deleted/blocked comments
-				const activeComments = commentsData.filter((comment: CommentResponse) => {
-					// Note: The API might return isDeleted field, but CommentResponse doesn't include it
-					// We'll assume all returned comments are active
-					return true;
-				});
-
-				// Simple pagination (client-side for now)
-				const pageSize = 5;
-				const start = (commentPage - 1) * pageSize;
-				const end = start + pageSize;
-				const paginatedComments = activeComments.slice(start, end);
-
-				// Load user info for each comment
+				// Load user info cho root comments
 				const currentCache = userInfoCache;
-				const commentsWithUser: CommentWithUser[] = await Promise.all(
-					paginatedComments.map(async (comment: CommentResponse) => {
-						// Check cache first
+				const replyCountsMap = new Map<number, number>();
+				
+				// Load user info cho root comments và đếm số replies
+				const rootCommentsWithUser: CommentWithUser[] = await Promise.all(
+					rootCommentsData.map(async (comment: CommentResponse) => {
+						let userInfo: UserInfo | null = null;
+						
 						if (currentCache.has(comment.userId)) {
-							const cachedUser = currentCache.get(comment.userId)!;
-							return {
-								...comment,
-								user: {
-									username: cachedUser.username,
-									avatarUrl: cachedUser.avatarUrl,
-								},
-							};
+							userInfo = currentCache.get(comment.userId)!;
+						} else {
+							try {
+								const userResponse = await api.get<UserInfo>(endpoints.getUserById(comment.userId));
+								userInfo = userResponse.data;
+								setUserInfoCache((prev) => new Map(prev).set(comment.userId, userInfo!));
+							} catch (err) {
+								console.error(`Failed to load user info for userId ${comment.userId}:`, err);
+								userInfo = {
+									id: comment.userId,
+									username: `User ${comment.userId}`,
+									email: '',
+									avatarUrl: null,
+								};
+							}
 						}
 
-						// Load user info
+						const commentWithUser: CommentWithUser = {
+							...comment,
+							user: {
+								username: userInfo.username,
+								avatarUrl: userInfo.avatarUrl,
+							},
+						};
+						
+						// Đếm số replies cho comment này (không load chi tiết)
 						try {
-							const userResponse = await api.get<UserInfo>(endpoints.getUserById(comment.userId));
-							const userData = userResponse.data;
-							
-							// Update cache
-							setUserInfoCache((prev) => {
-								const newCache = new Map(prev);
-								newCache.set(comment.userId, userData);
-								return newCache;
-							});
-							
-							return {
-								...comment,
-								user: {
-									username: userData.username,
-									avatarUrl: userData.avatarUrl,
-								},
-							};
+							const repliesResponse = await api.get<CommentResponse[]>(endpoints.getRepliesByParentId(comment.id));
+							const repliesData = Array.isArray(repliesResponse.data) ? repliesResponse.data : [];
+							if (repliesData.length > 0) {
+								replyCountsMap.set(comment.id, repliesData.length);
+							}
 						} catch (err) {
-							console.error(`Failed to load user info for userId ${comment.userId}:`, err);
-							return {
-								...comment,
-								user: {
-									username: `User ${comment.userId}`,
-									avatarUrl: null,
-								},
-							};
+							console.error(`Failed to count replies for comment ${comment.id}:`, err);
 						}
+
+						return commentWithUser;
 					})
 				);
 
-				setComments(commentsWithUser);
-				setTotalComments(activeComments.length);
+				// Lưu tất cả comments và hiển thị theo displayedComments
+				setAllComments(rootCommentsWithUser);
+				setReplyCounts(replyCountsMap);
+				setTotalComments(rootCommentsWithUser.length);
+				// Reset displayedComments khi load lại
+				setDisplayedComments(5);
 			} catch (err: any) {
 				console.error('Error loading comments:', err);
 				console.error('Error details:', {
@@ -241,6 +246,14 @@ export default function StoryDetailPage() {
 				
 				setCommentError(errorMessage);
 				setComments([]);
+				setAllComments([]);
+				setReplies(new Map());
+				setNestedReplies(new Map());
+				setReplyCounts(new Map());
+				setNestedReplyCounts(new Map());
+				setShowReplies(new Set());
+				setShowNestedReplies(new Set());
+				setDisplayedComments(5);
 				setTotalComments(0);
 			} finally {
 				setCommentLoading(false);
@@ -248,9 +261,42 @@ export default function StoryDetailPage() {
 		};
 
 		loadComments();
-	}, [storyId, commentPage]);
+	}, [storyId]);
 
-	const commentPages = useMemo(() => Math.max(1, Math.ceil(totalComments / 5)), [totalComments]);
+	// Cập nhật comments hiển thị khi displayedComments thay đổi
+	useEffect(() => {
+		setComments(allComments.slice(0, displayedComments));
+	}, [displayedComments, allComments]);
+
+	// Scroll to comment khi có hash trong URL (từ notification)
+	useEffect(() => {
+		const hash = window.location.hash.substring(1); // Remove #
+		if (hash) {
+			// Đợi comments load xong
+			setTimeout(() => {
+				// Đầu tiên scroll đến phần comments section
+				const commentsSection = document.getElementById('comments-section');
+				if (commentsSection) {
+					commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				}
+				
+				// Sau đó scroll đến comment cụ thể
+				setTimeout(() => {
+					const element = document.getElementById(hash);
+					if (element) {
+						element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+						// Highlight comment
+						element.classList.add('ring-2', 'ring-brand', 'ring-offset-2', 'rounded-lg');
+						setTimeout(() => {
+							element.classList.remove('ring-2', 'ring-brand', 'ring-offset-2');
+						}, 2000);
+					}
+				}, 300);
+			}, 500);
+		}
+	}, [comments, storyId]);
+
+	const hasMoreComments = displayedComments < allComments.length;
 	const hasAccess = Boolean(storyId && purchases[storyId as string]);
 
 	const formatPrice = (price?: number) =>
@@ -326,6 +372,351 @@ export default function StoryDetailPage() {
 		}
 	};
 
+	const loadReplies = async (parentId: number) => {
+		if (loadingReplies.has(parentId) || replies.has(parentId)) return;
+
+		try {
+			setLoadingReplies((prev) => new Set(prev).add(parentId));
+			const response = await api.get<CommentResponse[]>(endpoints.getRepliesByParentId(parentId));
+			const repliesData = Array.isArray(response.data) ? response.data : [];
+
+			// Load user info for each reply
+			const currentCache = userInfoCache;
+			const repliesWithUser: CommentWithUser[] = await Promise.all(
+				repliesData.map(async (reply: CommentResponse) => {
+					if (currentCache.has(reply.userId)) {
+						const cachedUser = currentCache.get(reply.userId)!;
+						return {
+							...reply,
+							user: {
+								username: cachedUser.username,
+								avatarUrl: cachedUser.avatarUrl,
+							},
+						};
+					}
+
+					try {
+						const userResponse = await api.get<UserInfo>(endpoints.getUserById(reply.userId));
+						const userData = userResponse.data;
+						
+						setUserInfoCache((prev) => new Map(prev).set(reply.userId, userData));
+						
+						return {
+							...reply,
+							user: {
+								username: userData.username,
+								avatarUrl: userData.avatarUrl,
+							},
+						};
+					} catch (err) {
+						console.error(`Failed to load user info for reply userId ${reply.userId}:`, err);
+						return {
+							...reply,
+							user: {
+								username: `User ${reply.userId}`,
+								avatarUrl: null,
+							},
+						};
+					}
+				})
+			);
+
+			// Đếm nested replies cho mỗi reply
+			const nestedCountsMap = new Map<number, number>();
+			for (const reply of repliesWithUser) {
+				try {
+					const nestedResponse = await api.get<CommentResponse[]>(endpoints.getRepliesByParentId(reply.id));
+					const nestedData = Array.isArray(nestedResponse.data) ? nestedResponse.data : [];
+					if (nestedData.length > 0) {
+						nestedCountsMap.set(reply.id, nestedData.length);
+					}
+				} catch (err) {
+					// Ignore errors when counting nested replies
+				}
+			}
+
+			setReplies((prev) => new Map(prev).set(parentId, repliesWithUser));
+			setNestedReplyCounts((prev) => {
+				const newMap = new Map(prev);
+				nestedCountsMap.forEach((count, replyId) => {
+					newMap.set(replyId, count);
+				});
+				return newMap;
+			});
+			setShowReplies((prev) => new Set(prev).add(parentId));
+		} catch (err) {
+			console.error('Failed to load replies:', err);
+		} finally {
+			setLoadingReplies((prev) => {
+				const newSet = new Set(prev);
+				newSet.delete(parentId);
+				return newSet;
+			});
+		}
+	};
+
+	const loadNestedReplies = async (replyId: number) => {
+		if (loadingReplies.has(replyId) || nestedReplies.has(replyId)) return;
+
+		try {
+			setLoadingReplies((prev) => new Set(prev).add(replyId));
+			const response = await api.get<CommentResponse[]>(endpoints.getRepliesByParentId(replyId));
+			const nestedRepliesData = Array.isArray(response.data) ? response.data : [];
+
+			// Load user info for each nested reply
+			const currentCache = userInfoCache;
+			const nestedRepliesWithUser: CommentWithUser[] = await Promise.all(
+				nestedRepliesData.map(async (nestedReply: CommentResponse) => {
+					if (currentCache.has(nestedReply.userId)) {
+						const cachedUser = currentCache.get(nestedReply.userId)!;
+						return {
+							...nestedReply,
+							user: {
+								username: cachedUser.username,
+								avatarUrl: cachedUser.avatarUrl,
+							},
+						};
+					}
+
+					try {
+						const userResponse = await api.get<UserInfo>(endpoints.getUserById(nestedReply.userId));
+						const userData = userResponse.data;
+						
+						setUserInfoCache((prev) => new Map(prev).set(nestedReply.userId, userData));
+						
+						return {
+							...nestedReply,
+							user: {
+								username: userData.username,
+								avatarUrl: userData.avatarUrl,
+							},
+						};
+					} catch (err) {
+						console.error(`Failed to load user info for nested reply userId ${nestedReply.userId}:`, err);
+						return {
+							...nestedReply,
+							user: {
+								username: `User ${nestedReply.userId}`,
+								avatarUrl: null,
+							},
+						};
+					}
+				})
+			);
+
+			setNestedReplies((prev) => new Map(prev).set(replyId, nestedRepliesWithUser));
+			setShowNestedReplies((prev) => new Set(prev).add(replyId));
+		} catch (err) {
+			console.error('Failed to load nested replies:', err);
+		} finally {
+			setLoadingReplies((prev) => {
+				const newSet = new Set(prev);
+				newSet.delete(replyId);
+				return newSet;
+			});
+		}
+	};
+
+	const handleReplyToReply = async (replyId: number) => {
+		if (!storyId || !replyToReplyContent.trim() || !isAuthenticated || !user) {
+			if (!isAuthenticated) {
+				alert('Vui lòng đăng nhập để trả lời');
+			}
+			return;
+		}
+
+		// Get userId from user object
+		let userId: number;
+		if ('id' in user) {
+			userId = parseInt(user.id, 10);
+		} else if (user.profile?.sub) {
+			userId = parseInt(user.profile.sub, 10);
+		} else {
+			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			return;
+		}
+
+		if (isNaN(userId)) {
+			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			return;
+		}
+
+		try {
+			setSubmittingComment(true);
+
+			const commentRequest: CommentRequest = {
+				storyId: parseInt(storyId, 10),
+				chapterId: null,
+				userId: userId,
+				parentId: replyId, // Reply của reply
+				content: replyToReplyContent.trim(),
+			};
+
+			const response = await api.post<CommentResponse>(endpoints.createComment(), commentRequest);
+			const newNestedReply = response.data;
+
+			// Load user info for new nested reply
+			try {
+				const userResponse = await api.get<UserInfo>(endpoints.getUserById(newNestedReply.userId));
+				const userData = userResponse.data;
+				
+				setUserInfoCache((prev) => new Map(prev).set(newNestedReply.userId, userData));
+				
+				const nestedReplyWithUser: CommentWithUser = {
+					...newNestedReply,
+					user: {
+						username: userData.username,
+						avatarUrl: userData.avatarUrl,
+					},
+				};
+
+				// Add nested reply to nested replies map
+				setNestedReplies((prev) => {
+					const newMap = new Map(prev);
+					const existingNestedReplies = newMap.get(replyId) || [];
+					return newMap.set(replyId, [...existingNestedReplies, nestedReplyWithUser]);
+				});
+			} catch (err) {
+				console.error('Failed to load user info for new nested reply:', err);
+				const nestedReplyWithUser: CommentWithUser = {
+					...newNestedReply,
+					user: {
+						username: `User ${newNestedReply.userId}`,
+						avatarUrl: null,
+					},
+				};
+				setNestedReplies((prev) => {
+					const newMap = new Map(prev);
+					const existingNestedReplies = newMap.get(replyId) || [];
+					return newMap.set(replyId, [...existingNestedReplies, nestedReplyWithUser]);
+				});
+			}
+
+			setReplyToReplyContent('');
+			setReplyingToReplyId(null);
+			
+			// Cập nhật nested reply count
+			setNestedReplyCounts((prev) => {
+				const newMap = new Map(prev);
+				const currentCount = newMap.get(replyId) || 0;
+				return newMap.set(replyId, currentCount + 1);
+			});
+			
+			// Nếu đang hiển thị nested replies, thêm reply mới vào
+			if (showNestedReplies.has(replyId)) {
+				// Already added above
+			}
+		} catch (err: any) {
+			console.error('Error creating nested reply:', err);
+			const errorMessage = err.response?.data?.message || err.message || 'Không thể gửi trả lời. Vui lòng thử lại sau.';
+			alert(errorMessage);
+		} finally {
+			setSubmittingComment(false);
+		}
+	};
+
+	const handleReply = async (parentId: number) => {
+		if (!storyId || !replyContent.trim() || !isAuthenticated || !user) {
+			if (!isAuthenticated) {
+				alert('Vui lòng đăng nhập để trả lời');
+			}
+			return;
+		}
+
+		// Get userId from user object
+		let userId: number;
+		if ('id' in user) {
+			userId = parseInt(user.id, 10);
+		} else if (user.profile?.sub) {
+			userId = parseInt(user.profile.sub, 10);
+		} else {
+			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			return;
+		}
+
+		if (isNaN(userId)) {
+			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			return;
+		}
+
+		try {
+			setSubmittingComment(true);
+
+			const commentRequest: CommentRequest = {
+				storyId: parseInt(storyId, 10),
+				chapterId: null,
+				userId: userId,
+				parentId: parentId,
+				content: replyContent.trim(),
+			};
+
+			const response = await api.post<CommentResponse>(endpoints.createComment(), commentRequest);
+			const newReply = response.data;
+
+			// Load user info for new reply
+			try {
+				const userResponse = await api.get<UserInfo>(endpoints.getUserById(newReply.userId));
+				const userData = userResponse.data;
+				
+				setUserInfoCache((prev) => new Map(prev).set(newReply.userId, userData));
+				
+				const replyWithUser: CommentWithUser = {
+					...newReply,
+					user: {
+						username: userData.username,
+						avatarUrl: userData.avatarUrl,
+					},
+				};
+
+				// Add reply to replies map
+				setReplies((prev) => {
+					const newMap = new Map(prev);
+					const existingReplies = newMap.get(parentId) || [];
+					return newMap.set(parentId, [...existingReplies, replyWithUser]);
+				});
+			} catch (err) {
+				console.error('Failed to load user info for new reply:', err);
+				const replyWithUser: CommentWithUser = {
+					...newReply,
+					user: {
+						username: `User ${newReply.userId}`,
+						avatarUrl: null,
+					},
+				};
+				setReplies((prev) => {
+					const newMap = new Map(prev);
+					const existingReplies = newMap.get(parentId) || [];
+					return newMap.set(parentId, [...existingReplies, replyWithUser]);
+				});
+			}
+
+			setReplyContent('');
+			setReplyingToCommentId(null);
+			
+			// Cập nhật reply count và hiển thị reply mới
+			setReplyCounts((prev) => {
+				const newMap = new Map(prev);
+				const currentCount = newMap.get(parentId) || 0;
+				return newMap.set(parentId, currentCount + 1);
+			});
+			
+			// Nếu đang hiển thị replies, thêm reply mới vào
+			if (showReplies.has(parentId)) {
+				setReplies((prev) => {
+					const newMap = new Map(prev);
+					const existingReplies = newMap.get(parentId) || [];
+					return newMap.set(parentId, [...existingReplies, replyWithUser]);
+				});
+			}
+		} catch (err: any) {
+			console.error('Error creating reply:', err);
+			const errorMessage = err.response?.data?.message || err.message || 'Không thể gửi trả lời. Vui lòng thử lại sau.';
+			alert(errorMessage);
+		} finally {
+			setSubmittingComment(false);
+		}
+	};
+
 	const handleAddComment = async () => {
 		if (!storyId || !newComment.trim() || !isAuthenticated || !user) {
 			if (!isAuthenticated) {
@@ -384,7 +775,16 @@ export default function StoryDetailPage() {
 						avatarUrl: userData.avatarUrl,
 					},
 				};
-				setComments((prev) => [commentWithUser, ...prev]);
+				// Thêm vào đầu danh sách
+				setAllComments((prev) => {
+					const updated = [commentWithUser, ...prev];
+					// Tăng displayedComments nếu đang hiển thị hết
+					if (displayedComments >= prev.length) {
+						setDisplayedComments((current) => current + 1);
+					}
+					return updated;
+				});
+				setTotalComments((prev) => prev + 1);
 			} catch (err) {
 				console.error('Failed to load user info for new comment:', err);
 				// Add comment without user info
@@ -395,9 +795,16 @@ export default function StoryDetailPage() {
 						avatarUrl: null,
 					},
 				};
-				setComments((prev) => [commentWithUser, ...prev]);
+				setAllComments((prev) => {
+					const updated = [commentWithUser, ...prev];
+					// Tăng displayedComments nếu đang hiển thị hết
+					if (displayedComments >= prev.length) {
+						setDisplayedComments((current) => current + 1);
+					}
+					return updated;
+				});
+				setTotalComments((prev) => prev + 1);
 			}
-			setTotalComments((prev) => prev + 1);
 			setNewComment('');
 		} catch (err: any) {
 			console.error('Error creating comment:', err);
@@ -640,7 +1047,7 @@ export default function StoryDetailPage() {
 					</div>
 				</div>
 
-				<aside className="space-y-6">
+				<aside id="comments-section" className="space-y-6">
 					<div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
 						<div className="flex items-center justify-between">
 							<h3 className="text-lg font-semibold text-zinc-900 dark:text-white">Bình luận</h3>
@@ -696,7 +1103,7 @@ export default function StoryDetailPage() {
 									const isDeleting = deletingCommentId === comment.id;
 									
 									return (
-										<div key={comment.id} className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+										<div key={comment.id} id={String(comment.id)} className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
 											<div className="flex items-start justify-between gap-3">
 												<div className="flex items-center gap-3 flex-1">
 													{comment.user?.avatarUrl ? (
@@ -740,36 +1147,267 @@ export default function StoryDetailPage() {
 											<p className="mt-3 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-300">
 												{comment.content}
 											</p>
+											<div className="mt-3 flex items-center gap-4">
+												{isAuthenticated && (
+													<button
+														onClick={() => {
+															if (replyingToCommentId === comment.id) {
+																setReplyingToCommentId(null);
+																setReplyContent('');
+															} else {
+																setReplyingToCommentId(comment.id);
+															}
+														}}
+														className="flex items-center gap-1 text-xs text-zinc-500 hover:text-brand transition-colors"
+													>
+														<Reply size={14} />
+														<span>Trả lời</span>
+													</button>
+												)}
+												{replyCounts.has(comment.id) && replyCounts.get(comment.id)! > 0 && (
+													<button
+														onClick={() => {
+															if (showReplies.has(comment.id)) {
+																// Ẩn replies
+																setShowReplies((prev) => {
+																	const newSet = new Set(prev);
+																	newSet.delete(comment.id);
+																	return newSet;
+																});
+															} else {
+																// Hiện replies - load nếu chưa có
+																if (!replies.has(comment.id)) {
+																	loadReplies(comment.id);
+																} else {
+																	setShowReplies((prev) => new Set(prev).add(comment.id));
+																}
+															}
+														}}
+														className="text-xs text-zinc-500 hover:text-brand transition-colors"
+													>
+														{showReplies.has(comment.id) ? (
+															<>Ẩn {replyCounts.get(comment.id)} trả lời</>
+														) : (
+															<>Xem {replyCounts.get(comment.id)} trả lời</>
+														)}
+													</button>
+												)}
+											</div>
+											{replyingToCommentId === comment.id && (
+												<div className="mt-4 space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+													<textarea
+														value={replyContent}
+														onChange={(e) => setReplyContent(e.target.value)}
+														placeholder={`Trả lời ${comment.user?.username || 'người dùng'}...`}
+														className="min-h-[80px] w-full rounded-lg border border-zinc-200 bg-white p-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-800"
+													/>
+													<div className="flex items-center justify-end gap-2">
+														<button
+															onClick={() => {
+																setReplyingToCommentId(null);
+																setReplyContent('');
+															}}
+															className="rounded-md px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800"
+														>
+															Hủy
+														</button>
+														<button
+															onClick={() => handleReply(comment.id)}
+															disabled={submittingComment || !replyContent.trim()}
+															className="inline-flex items-center gap-1 rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+														>
+															{submittingComment ? (
+																<>
+																	<div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+																	Đang gửi...
+																</>
+															) : (
+																<>
+																	<Reply size={12} />
+																	Trả lời
+																</>
+															)}
+														</button>
+													</div>
+												</div>
+											)}
+											{/* Hiển thị replies dưới parent comment với indent khi được mở */}
+											{showReplies.has(comment.id) && replies.has(comment.id) && replies.get(comment.id)!.length > 0 && (
+												<div className="mt-4 ml-6 space-y-3 border-l-2 border-zinc-300 pl-4 dark:border-zinc-700">
+													{loadingReplies.has(comment.id) ? (
+														<div className="py-2 text-center text-xs text-zinc-500">Đang tải...</div>
+													) : (
+														replies.get(comment.id)!.map((reply) => (
+															<div key={reply.id} className="space-y-2">
+																<div className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+																	<div className="flex items-center gap-2">
+																		{reply.user?.avatarUrl ? (
+																			<img
+																				src={reply.user.avatarUrl}
+																				alt={reply.user.username}
+																				className="h-8 w-8 rounded-full object-cover"
+																			/>
+																		) : (
+																			<div className="h-8 w-8 rounded-full bg-brand/20 flex items-center justify-center text-brand font-semibold text-xs">
+																				{reply.user?.username?.charAt(0).toUpperCase() || 'U'}
+																			</div>
+																		)}
+																		<div className="flex-1">
+																			<p className="text-xs font-semibold text-zinc-800 dark:text-white">
+																				{reply.user?.username || `User ${reply.userId}`}
+																			</p>
+																			<p className="text-xs text-zinc-500">
+																				{new Date(reply.createdAt).toLocaleString('vi-VN')}
+																			</p>
+																		</div>
+																	</div>
+																	<p className="mt-2 whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300">
+																		{reply.content}
+																	</p>
+																	<div className="mt-2 flex items-center gap-3">
+																		{isAuthenticated && (
+																			<button
+																				onClick={() => {
+																					if (replyingToReplyId === reply.id) {
+																						setReplyingToReplyId(null);
+																						setReplyToReplyContent('');
+																					} else {
+																						setReplyingToReplyId(reply.id);
+																						if (!nestedReplies.has(reply.id) && nestedReplyCounts.has(reply.id)) {
+																							loadNestedReplies(reply.id);
+																						}
+																					}
+																				}}
+																				className="flex items-center gap-1 text-xs text-zinc-500 hover:text-brand transition-colors"
+																			>
+																				<Reply size={12} />
+																				<span>Trả lời</span>
+																			</button>
+																		)}
+																		{nestedReplyCounts.has(reply.id) && nestedReplyCounts.get(reply.id)! > 0 && (
+																			<button
+																				onClick={() => {
+																					if (showNestedReplies.has(reply.id)) {
+																						setShowNestedReplies((prev) => {
+																							const newSet = new Set(prev);
+																							newSet.delete(reply.id);
+																							return newSet;
+																						});
+																					} else {
+																						if (!nestedReplies.has(reply.id)) {
+																							loadNestedReplies(reply.id);
+																						} else {
+																							setShowNestedReplies((prev) => new Set(prev).add(reply.id));
+																						}
+																					}
+																				}}
+																				className="text-xs text-zinc-500 hover:text-brand transition-colors"
+																			>
+																				{showNestedReplies.has(reply.id) ? (
+																					<>Ẩn {nestedReplyCounts.get(reply.id)} trả lời</>
+																				) : (
+																					<>Xem {nestedReplyCounts.get(reply.id)} trả lời</>
+																				)}
+																			</button>
+																		)}
+																	</div>
+																	{replyingToReplyId === reply.id && (
+																		<div className="mt-3 space-y-2 rounded-lg border border-zinc-200 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-800">
+																			<textarea
+																				value={replyToReplyContent}
+																				onChange={(e) => setReplyToReplyContent(e.target.value)}
+																				placeholder={`Trả lời ${reply.user?.username || 'người dùng'}...`}
+																				className="min-h-[60px] w-full rounded-lg border border-zinc-200 bg-white p-2 text-xs focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-600 dark:bg-zinc-900"
+																			/>
+																			<div className="flex items-center justify-end gap-2">
+																				<button
+																					onClick={() => {
+																						setReplyingToReplyId(null);
+																						setReplyToReplyContent('');
+																					}}
+																					className="rounded-md px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
+																				>
+																					Hủy
+																				</button>
+																				<button
+																					onClick={() => handleReplyToReply(reply.id)}
+																					disabled={submittingComment || !replyToReplyContent.trim()}
+																					className="inline-flex items-center gap-1 rounded-md bg-brand px-2 py-1 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+																				>
+																					{submittingComment ? (
+																						<>
+																							<div className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+																							Đang gửi...
+																						</>
+																					) : (
+																						<>
+																							<Reply size={10} />
+																							Trả lời
+																						</>
+																					)}
+																				</button>
+																			</div>
+																		</div>
+																	)}
+																</div>
+																{/* Hiển thị nested replies (replies của reply) */}
+																{showNestedReplies.has(reply.id) && nestedReplies.has(reply.id) && nestedReplies.get(reply.id)!.length > 0 && (
+																	<div className="ml-4 space-y-2 border-l-2 border-zinc-300 pl-3 dark:border-zinc-700">
+																		{loadingReplies.has(reply.id) ? (
+																			<div className="py-1 text-center text-xs text-zinc-500">Đang tải...</div>
+																		) : (
+																			nestedReplies.get(reply.id)!.map((nestedReply) => (
+																				<div key={nestedReply.id} className="rounded-lg border border-zinc-200 bg-zinc-50/30 p-2 dark:border-zinc-800 dark:bg-zinc-900/30">
+																					<div className="flex items-center gap-2">
+																						{nestedReply.user?.avatarUrl ? (
+																							<img
+																								src={nestedReply.user.avatarUrl}
+																								alt={nestedReply.user.username}
+																								className="h-6 w-6 rounded-full object-cover"
+																							/>
+																						) : (
+																							<div className="h-6 w-6 rounded-full bg-brand/20 flex items-center justify-center text-brand font-semibold text-[10px]">
+																								{nestedReply.user?.username?.charAt(0).toUpperCase() || 'U'}
+																							</div>
+																						)}
+																						<div className="flex-1">
+																							<p className="text-[10px] font-semibold text-zinc-800 dark:text-white">
+																								{nestedReply.user?.username || `User ${nestedReply.userId}`}
+																							</p>
+																							<p className="text-[10px] text-zinc-500">
+																								{new Date(nestedReply.createdAt).toLocaleString('vi-VN')}
+																							</p>
+																						</div>
+																					</div>
+																					<p className="mt-1 whitespace-pre-wrap text-[10px] text-zinc-600 dark:text-zinc-300">
+																						{nestedReply.content}
+																					</p>
+																				</div>
+																			))
+																		)}
+																	</div>
+																)}
+															</div>
+														))
+													)}
+												</div>
+											)}
 										</div>
 									);
 								})
 							)}
 						</div>
-						<div className="mt-4 flex items-center justify-center gap-2">
-							<button
-								className="rounded-md border border-zinc-200 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-zinc-800"
-								onClick={() => setCommentPage((prev) => Math.max(1, prev - 1))}
-								disabled={commentPage === 1}
-							>
-								Trước
-							</button>
-							{Array.from({ length: commentPages }).map((_, index) => (
+						{/* Load more button thay vì pagination */}
+						{hasMoreComments && (
+							<div className="mt-4 flex items-center justify-center">
 								<button
-									key={index}
-									className={`rounded-md px-3 py-1.5 text-sm ${commentPage === index + 1 ? 'bg-brand text-white' : 'border border-zinc-200 dark:border-zinc-800'}`}
-									onClick={() => setCommentPage(index + 1)}
+									onClick={() => setDisplayedComments((prev) => prev + 5)}
+									className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
 								>
-									{index + 1}
+									Xem thêm bình luận ({allComments.length - displayedComments} còn lại)
 								</button>
-							))}
-							<button
-								className="rounded-md border border-zinc-200 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-zinc-800"
-								onClick={() => setCommentPage((prev) => Math.min(commentPages, prev + 1))}
-								disabled={commentPage >= commentPages}
-							>
-								Sau
-							</button>
-						</div>
+							</div>
+						)}
 					</div>
 
 					<div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">

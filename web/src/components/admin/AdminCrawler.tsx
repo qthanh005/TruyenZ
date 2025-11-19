@@ -16,7 +16,7 @@ export default function AdminCrawler() {
 	const [storyServiceUrl, setStoryServiceUrl] = useState('http://localhost:8083');
 	const [dbHost, setDbHost] = useState('localhost');
 	const [dbPort, setDbPort] = useState('5432');
-	const [dbName, setDbName] = useState('story_db');
+	const [dbName, setDbName] = useState('storydb');
 	const [dbUser, setDbUser] = useState('postgres');
 	const [dbPassword, setDbPassword] = useState('postgres123');
 	const [isRunning, setIsRunning] = useState(false);
@@ -126,7 +126,7 @@ export default function AdminCrawler() {
 			if (storyId && !skipApi) {
 				setCrawlResult({ storyId, success: true });
 				appendLog(`✓ Đã tạo story thành công với ID: ${storyId}`);
-				appendLog('Truyện đã được lưu vào database story_db.');
+				appendLog('Truyện đã được lưu vào database storydb.');
 			} else if (skipApi) {
 				setCrawlResult({ success: true });
 				appendLog('✓ Crawl hoàn thành (bỏ qua API, chỉ lưu file).');
@@ -257,7 +257,7 @@ export default function AdminCrawler() {
 									type="text"
 									value={dbName}
 									onChange={(e) => setDbName(e.target.value)}
-									placeholder="story_db"
+									placeholder="storydb"
 									className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 dark:border-zinc-800 dark:bg-zinc-900"
 								/>
 							</div>
@@ -346,7 +346,7 @@ export default function AdminCrawler() {
 							)}
 							<p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
 								{crawlResult.storyId 
-									? 'Truyện đã được lưu vào database story_db và có thể xem trên trang web.'
+									? 'Truyện đã được lưu vào database storydb và có thể xem trên trang web.'
 									: 'Dữ liệu đã được crawl và lưu vào file system.'}
 							</p>
 						</div>
@@ -399,7 +399,7 @@ export default function AdminCrawler() {
 						<strong>Crawl thông tin truyện:</strong> Crawl thông tin truyện, ảnh bìa và các chương từ truyenqqgo.com
 					</li>
 					<li>
-						<strong>Lưu vào database:</strong> Khi crawl xong, truyện sẽ tự động được lưu vào database story_db qua API story-service
+						<strong>Lưu vào database:</strong> Khi crawl xong, truyện sẽ tự động được lưu vào database storydb qua API story-service
 					</li>
 					<li>
 						<strong>Bỏ qua chương:</strong> Chọn "Bỏ qua việc tải ảnh các chương" để chỉ crawl thông tin truyện

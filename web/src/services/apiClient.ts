@@ -65,6 +65,7 @@ export const endpoints = {
 	createComment: () => '/api/comments',
 	getCommentsByChapterAndStory: (chapterId: string, storyId: string) => `/api/comments/chapter/${chapterId}/story/${storyId}`,
 	getRootCommentsByStory: (storyId: string) => `/api/comments/story/${storyId}/root`,
+	getRepliesByParentId: (parentId: string | number) => `/api/comments/parent/${parentId}/replies`,
 	updateComment: (commentId: string) => `/api/comments/${commentId}`,
 	deleteComment: (commentId: string) => `/api/comments/${commentId}/delete`,
 	blockComment: (commentId: string) => `/api/comments/${commentId}/block`,
@@ -80,6 +81,10 @@ export const endpoints = {
 	paymentPurchaseStory: () => '/api/payment/purchase-story',
 	paymentHistory: () => '/api/payment/user/history',
 	paymentTransaction: (transactionId: string) => `/api/payment/transaction/${transactionId}`,
+
+	// Notification Service
+	getNotifications: (userId: string | number) => `/api/notification/user/${userId}`,
+	markNotificationAsRead: (notificationId: string | number) => `/api/notification/${notificationId}/read`,
 };
 
 
