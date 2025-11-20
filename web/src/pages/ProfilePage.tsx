@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bookmark, Clock, Shield, Star, User as UserIcon, Wallet } from 'lucide-react';
+import { Bookmark, Clock, Shield, Star, User as UserIcon, Wallet, Heart } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 import { useAuth } from '@/providers/AuthProvider';
 import { mockBookmarks, mockHistory } from '@/shared/mocks';
 import { useWalletStore } from '@/shared/stores/walletStore';
+import { api, endpoints } from '@/services/apiClient';
 
 type BookmarkItem = {
 	id: string;
@@ -17,6 +19,13 @@ type HistoryItem = {
 	title: string;
 	lastReadAt?: string;
 	progress?: string;
+};
+
+type FollowedStory = {
+	id: number;
+	title: string;
+	coverImageId?: string;
+	author?: string;
 };
 
 const gradientPalette = [
@@ -45,9 +54,11 @@ function uppercaseInitials(name: string) {
 }
 
 export default function ProfilePage() {
-	const { user } = useAuth();
+	const { user, isAuthenticated } = useAuth();
 	const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
 	const [history, setHistory] = useState<HistoryItem[]>([]);
+	const [followedStories, setFollowedStories] = useState<FollowedStory[]>([]);
+	const [loadingFollowed, setLoadingFollowed] = useState(false);
 	const balance = useWalletStore((state) => state.balance);
 	const openTopUp = useWalletStore((state) => state.open);
 
@@ -70,6 +81,46 @@ export default function ProfilePage() {
 		}, 300);
 		return () => clearTimeout(timer);
 	}, [user]);
+
+	// Load followed stories
+	useEffect(() => {
+		if (!isAuthenticated) return;
+
+		const loadFollowedStories = async () => {
+			try {
+				setLoadingFollowed(true);
+				const response = await api.get<{ storyIds: number[] }>(endpoints.getFollowedStories());
+				const storyIds = response.data.storyIds;
+
+				if (storyIds.length === 0) {
+					setFollowedStories([]);
+					return;
+				}
+
+				// Load story details for each storyId
+				const storyPromises = storyIds.map(async (storyId) => {
+					try {
+						const storyResponse = await api.get(endpoints.storyDetail(String(storyId)));
+						return storyResponse.data;
+					} catch (err) {
+						console.error(`Failed to load story ${storyId}:`, err);
+						return null;
+					}
+				});
+
+				const stories = await Promise.all(storyPromises);
+				const validStories = stories.filter((story): story is FollowedStory => story !== null);
+				setFollowedStories(validStories);
+			} catch (err) {
+				console.error('Failed to load followed stories:', err);
+				setFollowedStories([]);
+			} finally {
+				setLoadingFollowed(false);
+			}
+		};
+
+		loadFollowedStories();
+	}, [isAuthenticated]);
 
 	const displayName =
 		user?.profile?.name ||
@@ -94,6 +145,13 @@ export default function ProfilePage() {
 
 	const stats = useMemo(
 		() => [
+			{
+				label: 'Truyện đã theo dõi',
+				value: followedStories.length,
+				icon: Heart,
+				theme: 'bg-rose-500/10 text-rose-500',
+				subtext: 'Tất cả truyện đang theo dõi',
+			},
 			{
 				label: 'Truyện đã lưu',
 				value: bookmarks.length,
@@ -130,7 +188,7 @@ export default function ProfilePage() {
 				subtext: 'Dùng để mua truyện premium',
 			},
 		],
-		[bookmarks.length, history.length, role, balance]
+		[followedStories.length, bookmarks.length, history.length, role, balance]
 	);
 
 	const siteHighlights = [
@@ -218,6 +276,63 @@ export default function ProfilePage() {
 			</section>
 
 			<section className="grid gap-8 lg:grid-cols-2">
+				<div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+					<div className="flex items-center justify-between">
+						<h2 className="text-xl font-semibold text-zinc-900 dark:text-white">Truyện đang theo dõi</h2>
+						{followedStories.length > 0 && (
+							<button className="text-sm text-brand hover:underline">Xem tất cả</button>
+						)}
+					</div>
+					<div className="mt-6 grid gap-4">
+						{loadingFollowed ? (
+							<div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+								<div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-solid border-brand border-r-transparent"></div>
+								<p className="mt-2">Đang tải...</p>
+							</div>
+						) : followedStories.length === 0 ? (
+							<div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+								<Heart className="mx-auto mb-2 h-8 w-8 text-zinc-400" />
+								Bạn chưa theo dõi truyện nào. Hãy khám phá và nhấn nút "Theo dõi" trên trang chi tiết truyện!
+							</div>
+						) : (
+							followedStories.map((story) => {
+								const coverUrl = story.coverImageId
+									? `${import.meta.env.VITE_API_GATEWAY_URL || 'http://localhost:8081'}${story.coverImageId}`
+									: `https://picsum.photos/seed/story-${story.id}/200/260`;
+								return (
+									<Link
+										key={story.id}
+										to={`/story/${story.id}`}
+										className="flex items-center gap-4 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-4 transition hover:border-brand/50 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:border-brand/60"
+									>
+										<div className="h-20 w-16 overflow-hidden rounded-xl bg-zinc-200 shadow-inner">
+											<img
+												src={coverUrl}
+												alt={story.title}
+												className="h-full w-full object-cover"
+												loading="lazy"
+											/>
+										</div>
+										<div className="min-w-0 flex-1">
+											<h3 className="truncate text-sm font-semibold text-zinc-900 dark:text-white">
+												{story.title}
+											</h3>
+											{story.author && (
+												<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+													Tác giả: {story.author}
+												</p>
+											)}
+										</div>
+										<div className="rounded-full bg-rose-500/10 px-3 py-1 text-xs font-medium text-rose-500">
+											<Heart size={14} className="inline fill-current" />
+										</div>
+									</Link>
+								);
+							})
+						)}
+					</div>
+				</div>
+
 				<div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
 					<div className="flex items-center justify-between">
 						<h2 className="text-xl font-semibold text-zinc-900 dark:text-white">Bookmark yêu thích</h2>

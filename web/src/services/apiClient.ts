@@ -52,6 +52,11 @@ export const endpoints = {
 	bookmarks: () => '/api/user/bookmarks',
 	history: () => '/api/user/history',
 	balance: () => '/api/user/balance',
+	// Follow Service
+	followStory: (storyId: string | number) => `/api/user/follow/${storyId}`,
+	unfollowStory: (storyId: string | number) => `/api/user/follow/${storyId}`,
+	checkFollowing: (storyId: string | number) => `/api/user/follow/${storyId}/check`,
+	getFollowedStories: () => '/api/user/follow/list',
 
 	// Story Service
 	stories: () => '/api/story',
@@ -60,6 +65,16 @@ export const endpoints = {
 	chapterById: (chapterId: string) => `/api/story/chapters/${chapterId}`,
 	chapterContent: (storyId: string, chapterId: string) => `/api/story/${storyId}/chapters/${chapterId}`,
 	searchStories: (q: string) => `/api/story/search?title=${encodeURIComponent(q)}`,
+	checkStoryPurchase: (storyId: string | number) => `/api/story/${storyId}/purchase/check`,
+	getAllGenres: () => '/api/story/genres',
+	getStoriesByGenre: (genre: string, page?: number, size?: number) => {
+		const encodedGenre = encodeURIComponent(genre);
+		const params = new URLSearchParams();
+		if (page !== undefined) params.append('page', String(page));
+		if (size !== undefined) params.append('size', String(size));
+		const query = params.toString();
+		return `/api/story/genre/${encodedGenre}${query ? '?' + query : ''}`;
+	},
 
 	// Comment Service
 	createComment: () => '/api/comments',

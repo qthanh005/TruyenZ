@@ -27,7 +27,8 @@ type PremiumState = {
 	openCheckout: (story: CheckoutStory) => void;
 	closeCheckout: () => void;
 	purchaseStory: (payload: { method: PaymentMethod }) => Promise<void>;
-	hasAccess: (storyId: string) => boolean;
+	hasAccess: (storyId: string | number) => boolean;
+	checkPurchase: (storyId: string | number) => Promise<boolean>;
 };
 
 export const usePremiumStore = create<PremiumState>()(
@@ -64,11 +65,13 @@ export const usePremiumStore = create<PremiumState>()(
 						price: checkoutStory.price,
 					});
 
+					// Mua thành công - lưu vào purchases với key là string
+					const storyIdStr = String(checkoutStory.id);
 					set((state) => ({
 						purchases: {
 							...state.purchases,
-							[checkoutStory.id]: {
-								storyId: checkoutStory.id,
+							[storyIdStr]: {
+								storyId: storyIdStr,
 								price: checkoutStory.price,
 								method,
 								purchasedAt: new Date().toISOString(),
@@ -85,7 +88,58 @@ export const usePremiumStore = create<PremiumState>()(
 				}
 			},
 			hasAccess(storyId) {
-				return Boolean(get().purchases[storyId]);
+				// Check trong localStorage trước (fast check)
+				const storyIdStr = String(storyId);
+				return Boolean(get().purchases[storyIdStr]);
+			},
+			async checkPurchase(storyId) {
+				// Check từ backend để đảm bảo chính xác
+				const storyIdStr = String(storyId);
+				try {
+					console.log(`[PremiumStore] Checking purchase for storyId: ${storyIdStr}`);
+					const response = await api.get<{ purchased: boolean }>(endpoints.checkStoryPurchase(storyId));
+					const hasPurchased = response.data?.purchased || false;
+					console.log(`[PremiumStore] Purchase check result for storyId ${storyIdStr}: ${hasPurchased}`);
+					
+					// Update localStorage nếu có purchase
+					if (hasPurchased) {
+						const existingPurchase = get().purchases[storyIdStr];
+						if (!existingPurchase) {
+							// Thêm vào purchases nếu chưa có
+							set((state) => ({
+								purchases: {
+									...state.purchases,
+									[storyIdStr]: {
+										storyId: storyIdStr,
+										price: 0, // Không biết price từ API này
+										method: 'vnpay',
+										purchasedAt: new Date().toISOString(),
+									},
+								},
+							}));
+							console.log(`[PremiumStore] Added purchase record for storyId: ${storyIdStr}`);
+						}
+					} else {
+						// Nếu không có purchase, xóa khỏi localStorage để đảm bảo sync
+						const existingPurchase = get().purchases[storyIdStr];
+						if (existingPurchase) {
+							set((state) => {
+								const newPurchases = { ...state.purchases };
+								delete newPurchases[storyIdStr];
+								return { purchases: newPurchases };
+							});
+							console.log(`[PremiumStore] Removed purchase record for storyId: ${storyIdStr} (not purchased)`);
+						}
+					}
+					
+					return hasPurchased;
+				} catch (error) {
+					// Nếu API fail, fallback về localStorage check
+					console.error(`[PremiumStore] Failed to check purchase from backend for storyId ${storyIdStr}:`, error);
+					const localAccess = get().hasAccess(storyId);
+					console.log(`[PremiumStore] Fallback to localStorage check for storyId ${storyIdStr}: ${localAccess}`);
+					return localAccess;
+				}
 			},
 		}),
 		{

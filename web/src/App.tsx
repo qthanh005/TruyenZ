@@ -12,6 +12,7 @@ import CategoriesPage from '@/pages/CategoriesPage';
 import HistoryPage from '@/pages/HistoryPage';
 import RankingPage from '@/pages/RankingPage';
 import AdminPage from '@/pages/AdminPage';
+import FollowPage from '@/pages/FollowPage';
 
 function PrivateRoute({ children }: { children: JSX.Element }) {
 	const { isAuthenticated, isLoading } = useAuth();
@@ -92,6 +93,16 @@ export default function App() {
 							<Layout>
 								<RankingPage />
 							</Layout>
+						}
+					/>
+					<Route
+						path="/follows"
+						element={
+							<PrivateRoute>
+								<Layout>
+									<FollowPage />
+								</Layout>
+							</PrivateRoute>
 						}
 					/>
 					<Route

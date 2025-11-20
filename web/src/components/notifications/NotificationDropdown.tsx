@@ -138,38 +138,55 @@ export function NotificationDropdown() {
 		}
 
 		if (notification.link) {
-			// Parse link để lấy storyId và commentId
-			const linkParts = notification.link.split('/');
-			const storyId = linkParts[2]; // /story/{storyId}/...
-			const hash = notification.link.split('#')[1]; // commentId từ hash
-			
-			// Navigate đến story page
-			navigate(`/story/${storyId}`);
-			setIsOpen(false);
-			
-			// Scroll to comments section và comment cụ thể
-			setTimeout(() => {
-				// Đầu tiên scroll đến phần comments section
-				const commentsSection = document.getElementById('comments-section');
-				if (commentsSection) {
-					commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			// Kiểm tra xem link có phải là story link không
+			if (notification.link.startsWith('/story/')) {
+				// Parse link để lấy storyId và commentId
+				const linkParts = notification.link.split('/');
+				const storyId = linkParts[2]; // /story/{storyId}/...
+				
+				// Validate storyId
+				if (!storyId || storyId === 'undefined' || storyId === 'null') {
+					console.error('Invalid storyId in notification link:', notification.link);
+					navigate('/');
+					setIsOpen(false);
+					return;
 				}
 				
-				// Sau đó scroll đến comment cụ thể nếu có hash
-				if (hash) {
-					setTimeout(() => {
-						const commentElement = document.getElementById(hash);
-						if (commentElement) {
-							commentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-							// Highlight comment
-							commentElement.classList.add('ring-2', 'ring-brand', 'ring-offset-2', 'rounded-lg');
-							setTimeout(() => {
-								commentElement.classList.remove('ring-2', 'ring-brand', 'ring-offset-2');
-							}, 2000);
-						}
-					}, 300);
-				}
-			}, 500);
+				const hash = notification.link.split('#')[1]; // commentId từ hash
+				
+				// Navigate đến story page
+				navigate(`/story/${storyId}`);
+				setIsOpen(false);
+				
+				// Scroll to comments section và comment cụ thể
+				setTimeout(() => {
+					// Đầu tiên scroll đến phần comments section
+					const commentsSection = document.getElementById('comments-section');
+					if (commentsSection) {
+						commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+					}
+					
+					// Sau đó scroll đến comment cụ thể nếu có hash
+					if (hash) {
+						setTimeout(() => {
+							const commentElement = document.getElementById(hash);
+							if (commentElement) {
+								commentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+								// Highlight comment
+								commentElement.classList.add('ring-2', 'ring-brand', 'ring-offset-2', 'rounded-lg');
+								setTimeout(() => {
+									commentElement.classList.remove('ring-2', 'ring-brand', 'ring-offset-2');
+								}, 2000);
+							}
+						}, 300);
+					}
+				}, 500);
+			} else {
+				// Link không phải story link (ví dụ: "/" cho deposit notification)
+				// Chỉ navigate đến link đó, không cần load story
+				navigate(notification.link);
+				setIsOpen(false);
+			}
 		}
 	};
 

@@ -1,9 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Flame, Sparkles, Star, TrendingUp } from 'lucide-react';
+import { api, endpoints } from '@/services/apiClient';
+
+type StoryResponse = {
+	id: number;
+	title: string;
+	description?: string;
+	coverImageId?: string;
+	genres?: string[];
+	author?: string;
+	price: number;
+	paid: boolean;
+};
 
 type Story = {
-	id: string;
+	id: string | number;
 	title: string;
 	description?: string;
 	cover?: string;
@@ -13,97 +25,6 @@ type Story = {
 	views?: number;
 	updatedAt?: string;
 };
-
-const HOT_STORIES: Story[] = [
-	{
-		id: '1',
-		title: 'Đại Chúa Tể',
-		description: 'Thiếu niên bước vào thế giới linh lực huyền ảo, viết lại truyền kỳ của bản thân.',
-		cover: 'https://picsum.photos/seed/hot-1/420/580',
-		genres: ['Huyền Huyễn', 'Hành Động'],
-		rating: 4.92,
-		trend: 35,
-		views: 1_823_000,
-		updatedAt: 'Cập nhật 10 phút trước',
-	},
-	{
-		id: '2',
-		title: 'One Piece',
-		description: 'Băng hải tặc Mũ Rơm tiếp tục hành trình chinh phục biển cả và giấc mơ tự do.',
-		cover: 'https://picsum.photos/seed/hot-2/420/580',
-		genres: ['Phiêu Lưu', 'Hành Động'],
-		rating: 4.9,
-		trend: 18,
-		views: 2_501_230,
-		updatedAt: 'Cập nhật 35 phút trước',
-	},
-	{
-		id: '3',
-		title: 'Attack on Titan',
-		description: 'Cuộc chiến sinh tồn giữa loài người và Titan với những bí mật kinh hoàng.',
-		cover: 'https://picsum.photos/seed/hot-3/420/580',
-		genres: ['Hành Động', 'Kịch Tính'],
-		rating: 4.94,
-		trend: 24,
-		views: 965_320,
-		updatedAt: 'Cập nhật 1 giờ trước',
-	},
-	{
-		id: '4',
-		title: 'Kimetsu no Yaiba',
-		description: 'Hành trình diệt quỷ cứu em gái với hơi thở mặt trời truyền thừa.',
-		cover: 'https://picsum.photos/seed/hot-4/420/580',
-		genres: ['Siêu Nhiên', 'Hành Động'],
-		rating: 4.87,
-		trend: 11,
-		views: 743_210,
-		updatedAt: 'Cập nhật hôm nay',
-	},
-	{
-		id: '5',
-		title: 'Solo Leveling',
-		description: 'Từ thợ săn yếu nhất hoá thành tồn tại vượt qua mọi giới hạn.',
-		cover: 'https://picsum.photos/seed/hot-5/420/580',
-		genres: ['Hành Động'],
-		rating: 4.8,
-		trend: 15,
-		views: 1_101_900,
-		updatedAt: 'Cập nhật 3 giờ trước',
-	},
-	{
-		id: '6',
-		title: 'Thám Tử Lừng Danh Conan',
-		description: 'Những vụ án hóc búa, từng bước vạch trần tổ chức áo đen.',
-		cover: 'https://picsum.photos/seed/hot-6/420/580',
-		genres: ['Trinh Thám'],
-		rating: 4.7,
-		trend: 6,
-		views: 902_450,
-		updatedAt: 'Cập nhật hôm qua',
-	},
-	{
-		id: '7',
-		title: 'Jujutsu Kaisen',
-		description: 'Chú thuật sư đối đầu lời nguyền mạnh nhất đại diện cho hỗn loạn.',
-		cover: 'https://picsum.photos/seed/hot-7/420/580',
-		genres: ['Siêu Nhiên'],
-		rating: 4.6,
-		trend: 8,
-		views: 563_220,
-		updatedAt: 'Cập nhật 2 ngày trước',
-	},
-	{
-		id: '8',
-		title: 'Spy x Family',
-		description: 'Gia đình mật vụ giả tưởng với những bí mật ngọt ngào.',
-		cover: 'https://picsum.photos/seed/hot-8/420/580',
-		genres: ['Gia Đình', 'Hài Hước'],
-		rating: 4.81,
-		trend: 9,
-		views: 468_930,
-		updatedAt: 'Cập nhật 5 giờ trước',
-	},
-];
 
 const FILTERS = [
 	{ key: 'all', label: 'Tất cả' },
@@ -116,19 +37,74 @@ const FILTERS = [
 
 export default function HotStoriesPage() {
 	const [activeFilter, setActiveFilter] = useState<string>('all');
+	const [stories, setStories] = useState<Story[]>([]);
+	const [loading, setLoading] = useState(true);
+
+	// Load hot stories from API
+	useEffect(() => {
+		const loadHotStories = async () => {
+			try {
+				setLoading(true);
+				const response = await api.get<StoryResponse[]>(endpoints.stories());
+				
+				// Convert to Story format and determine "hot" stories
+				// For now, we'll use the first stories as "hot" (can be improved with actual trending logic)
+				const allStories: Story[] = response.data.map((story) => {
+					const coverUrl = story.coverImageId
+						? `${(import.meta as any).env?.VITE_API_GATEWAY_URL || 'http://localhost:8081'}${story.coverImageId}`
+						: `https://picsum.photos/seed/story-${story.id}/420/580`;
+					
+					// Generate mock data for rating, trend, views (can be replaced with real data later)
+					const mockRating = 4.5 + Math.random() * 0.5; // 4.5 - 5.0
+					const mockTrend = Math.floor(Math.random() * 30) + 5; // 5 - 35
+					const mockViews = Math.floor(Math.random() * 2000000) + 100000; // 100k - 2M
+					
+					return {
+						id: story.id,
+						title: story.title,
+						description: story.description,
+						cover: coverUrl,
+						genres: story.genres || [],
+						rating: parseFloat(mockRating.toFixed(2)),
+						trend: mockTrend,
+						views: mockViews,
+						updatedAt: 'Cập nhật gần đây',
+					};
+				});
+
+				// Sort by ID (newest first) and take top stories as "hot"
+				// In a real app, this would be based on views, ratings, or trending algorithm
+				const sortedStories = allStories.sort((a, b) => {
+					const aId = typeof a.id === 'string' ? parseInt(a.id) : a.id;
+					const bId = typeof b.id === 'string' ? parseInt(b.id) : b.id;
+					return bId - aId; // Newest first
+				});
+
+				// Take top 8 as hot stories
+				setStories(sortedStories.slice(0, 8));
+			} catch (error) {
+				console.error('Error loading hot stories:', error);
+				setStories([]);
+			} finally {
+				setLoading(false);
+			}
+		};
+
+		loadHotStories();
+	}, []);
 
 	const { spotlight, others } = useMemo(() => {
 		const filtered =
 			activeFilter === 'all'
-				? HOT_STORIES
-				: HOT_STORIES.filter((story) =>
+				? stories
+				: stories.filter((story) =>
 						story.genres?.some((genre) => genre.toLowerCase().includes(activeFilter))
 				  );
 		return {
 			spotlight: filtered.slice(0, 3),
 			others: filtered.slice(3),
 		};
-	}, [activeFilter]);
+	}, [activeFilter, stories]);
 
 	return (
 		<div className="space-y-10">
@@ -172,8 +148,30 @@ export default function HotStoriesPage() {
 				</div>
 			</section>
 
-			<section className="grid gap-4 md:grid-cols-3">
-				{spotlight.map((story, index) => (
+			{loading ? (
+				<div className="grid gap-4 md:grid-cols-3">
+					{[...Array(3)].map((_, i) => (
+						<div key={i} className="animate-pulse rounded-3xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+							<div className="h-64 w-full rounded-t-3xl bg-zinc-200 dark:bg-zinc-800"></div>
+							<div className="mt-4 space-y-3">
+								<div className="h-4 w-24 rounded bg-zinc-200 dark:bg-zinc-800"></div>
+								<div className="h-6 w-32 rounded bg-zinc-200 dark:bg-zinc-800"></div>
+								<div className="h-4 w-full rounded bg-zinc-200 dark:bg-zinc-800"></div>
+							</div>
+						</div>
+					))}
+				</div>
+			) : spotlight.length === 0 ? (
+				<div className="rounded-3xl border border-dashed border-zinc-300 bg-white p-12 text-center dark:border-zinc-700 dark:bg-zinc-950">
+					<Flame className="mx-auto mb-4 h-16 w-16 text-zinc-400" />
+					<h3 className="text-xl font-semibold text-zinc-900 dark:text-white">Chưa có truyện hot</h3>
+					<p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+						Hiện chưa có truyện nào đang thịnh hành.
+					</p>
+				</div>
+			) : (
+				<section className="grid gap-4 md:grid-cols-3">
+					{spotlight.map((story, index) => (
 					<Link
 						key={story.id}
 						to={`/story/${story.id}`}
@@ -216,10 +214,12 @@ export default function HotStoriesPage() {
 							</div>
 						</div>
 					</Link>
-				))}
-			</section>
+					))}
+				</section>
+			)}
 
-			<section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+			{!loading && others.length > 0 && (
+				<section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
 				<div className="flex flex-wrap items-center justify-between gap-3">
 					<div>
 						<h2 className="text-xl font-semibold text-zinc-900 dark:text-white">Danh sách tiếp tục bùng nổ</h2>
@@ -273,6 +273,7 @@ export default function HotStoriesPage() {
 					))}
 				</div>
 			</section>
+			)}
 		</div>
 	);
 }

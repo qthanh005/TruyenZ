@@ -3,6 +3,7 @@ import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, CheckCircle, Flame, Layers, Sparkles, Star, XCircle } from 'lucide-react';
 import { api, endpoints } from '@/services/apiClient';
 import { useWalletStore } from '@/shared/stores/walletStore';
+import { usePremiumStore } from '@/shared/stores/premiumStore';
 
 type Story = {
 	id: string | number;
@@ -32,14 +33,17 @@ const mapStoryResponse = (story: StoryResponse, index?: number): Story & { badge
 		? `${import.meta.env.VITE_API_GATEWAY_URL || 'http://localhost:8081'}${story.coverImageId}`
 		: `https://picsum.photos/seed/story-${story.id}/420/560`;
 	
+	// Premium is determined by price > 0
+	const isPremium = story.price > 0;
+	
 	return {
 		id: story.id,
 		title: story.title,
 		cover: coverUrl,
 		genres: story.genres || [],
 		description: story.description,
-		isPremium: story.paid,
-		price: story.price > 0 ? story.price : undefined,
+		isPremium: isPremium,
+		price: isPremium ? story.price : undefined,
 		badge: index === 0 ? 'Siêu phẩm tuần này' : index === 1 ? 'Đang leo hạng' : index === 2 ? 'Xu hướng' : 'Cập nhật mới',
 	};
 };
@@ -76,6 +80,8 @@ export default function HomePage() {
 	const [searchParams, setSearchParams] = useSearchParams();
 	const navigate = useNavigate();
 	const { syncBalance } = useWalletStore();
+	const purchases = usePremiumStore((state) => state.purchases);
+	const hasAccess = usePremiumStore((state) => state.hasAccess);
 	const paymentStatus = searchParams.get('paymentStatus');
 	const txnRef = searchParams.get('txnRef');
 
@@ -205,9 +211,21 @@ export default function HomePage() {
 							/>
 							<div className="absolute inset-0 bg-gradient-to-br from-black/80 via-black/50 to-black/20" />
 							<div className="absolute inset-x-0 bottom-0 p-6 pb-8 sm:p-10">
-								<div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-300">
-									<Flame size={14} />
-									{story.badge}
+								<div className="flex items-center gap-2 flex-wrap">
+									<div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-300">
+										<Flame size={14} />
+										{story.badge}
+									</div>
+									{story.isPremium && (
+										<div className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white shadow-lg ${
+											hasAccess(String(story.id))
+												? 'bg-emerald-500/90'
+												: 'bg-amber-500/90'
+										}`}>
+											<Sparkles size={14} />
+											{hasAccess(String(story.id)) ? 'Đã mua' : 'Premium'}
+										</div>
+									)}
 								</div>
 								<h2 className="mt-4 text-2xl font-semibold sm:text-3xl md:text-4xl">{story.title}</h2>
 								<p className="mt-2 max-w-2xl text-sm text-zinc-200 sm:text-base">{story.description}</p>
@@ -285,7 +303,13 @@ export default function HomePage() {
 							<Link
 								key={story.id}
 								to={`/story/${story.id}`}
-								className="group relative overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:-translate-y-1 hover:border-brand/40 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-950"
+								className={`group relative overflow-hidden rounded-2xl border bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg dark:bg-zinc-950 ${
+									story.isPremium 
+										? hasAccess(String(story.id))
+											? 'border-emerald-400 border-2 shadow-emerald-200/20 hover:border-emerald-500 dark:border-emerald-500 dark:shadow-emerald-500/20'
+											: 'border-amber-400 border-2 shadow-amber-200/20 hover:border-amber-500 dark:border-amber-500 dark:shadow-amber-500/20'
+										: 'border-zinc-200 hover:border-brand/40 dark:border-zinc-800'
+								}`}
 							>
 								<div className="relative aspect-[3/4] w-full overflow-hidden bg-zinc-200">
 									<img
@@ -297,10 +321,18 @@ export default function HomePage() {
 									<div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
 									<div
 										className={`absolute left-3 top-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white ${
-											story.isPremium ? 'bg-amber-500' : 'bg-brand/90'
+											story.isPremium 
+												? hasAccess(String(story.id))
+													? 'bg-emerald-500'
+													: 'bg-amber-500'
+												: 'bg-brand/90'
 										}`}
 									>
-										{story.isPremium ? 'Premium' : index % 2 === 0 ? 'Mới' : 'Cập nhật'}
+										{story.isPremium 
+											? hasAccess(String(story.id)) 
+												? 'Đã mua' 
+												: 'Premium'
+											: index % 2 === 0 ? 'Mới' : 'Cập nhật'}
 									</div>
 								</div>
 								<div className="space-y-2 p-3">
@@ -310,9 +342,14 @@ export default function HomePage() {
 									{story.genres && (
 										<p className="text-xs text-zinc-500 dark:text-zinc-400">{story.genres.join(', ')}</p>
 									)}
-									{story.isPremium && (
+									{story.isPremium && !hasAccess(String(story.id)) && (
 										<p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
 											Giá: {formatPrice(story.price)}
+										</p>
+									)}
+									{story.isPremium && hasAccess(String(story.id)) && (
+										<p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+											✓ Đã sở hữu
 										</p>
 									)}
 								</div>

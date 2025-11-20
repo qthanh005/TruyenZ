@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Flame, Layers, Lock, Sparkles, Star, Users, Trash2, Reply, X } from 'lucide-react';
+import { Flame, Layers, Lock, Sparkles, Star, Users, Trash2, Reply, X, Heart } from 'lucide-react';
 
 import { CheckoutModal } from '@/components/payments/CheckoutModal';
 import { usePremiumStore } from '@/shared/stores/premiumStore';
@@ -91,8 +91,13 @@ export default function StoryDetailPage() {
 	const [displayedComments, setDisplayedComments] = useState(5); // Số comments hiển thị (infinite scroll)
 	const openCheckout = usePremiumStore((state) => state.openCheckout);
 	const purchases = usePremiumStore((state) => state.purchases);
-	const purchaseRecord = storyId ? purchases[storyId as string] : undefined;
+	const checkPurchase = usePremiumStore((state) => state.checkPurchase);
+	const purchaseRecord = storyId ? purchases[String(storyId)] : undefined;
 	const { user, isAuthenticated } = useAuth();
+	const [hasAccess, setHasAccess] = useState(false);
+	const [isCheckingPurchase, setIsCheckingPurchase] = useState(false);
+	const [isFollowing, setIsFollowing] = useState(false);
+	const [isTogglingFollow, setIsTogglingFollow] = useState(false);
 
 	// Load story details from API
 	useEffect(() => {
@@ -108,10 +113,14 @@ export default function StoryDetailPage() {
 				const storyData = storyResponse.data;
 
 				// Map story response to Story type
+				const gatewayUrl = (import.meta as any).env?.VITE_API_GATEWAY_URL || 'http://localhost:8081';
 				const coverUrl = storyData.coverImageId
-					? `${import.meta.env.VITE_API_GATEWAY_URL || 'http://localhost:8081'}${storyData.coverImageId}`
+					? `${gatewayUrl}${storyData.coverImageId}`
 					: `https://picsum.photos/seed/story-${storyData.id}/1200/680`;
 
+				// Premium is determined by price > 0
+				const isPremium = storyData.price > 0;
+				
 				const mappedStory: Story = {
 					id: storyData.id,
 					title: storyData.title,
@@ -119,11 +128,44 @@ export default function StoryDetailPage() {
 					cover: coverUrl,
 					description: storyData.description,
 					genres: storyData.genres || [],
-					isPremium: storyData.paid,
-					price: storyData.price > 0 ? storyData.price : undefined,
+					isPremium: isPremium,
+					price: isPremium ? storyData.price : undefined,
 				};
 
 				setStory(mappedStory);
+
+				// Check purchase status từ backend nếu là premium story
+				if (isPremium && isAuthenticated) {
+					setIsCheckingPurchase(true);
+					try {
+						console.log(`[StoryDetailPage] Checking purchase for storyId: ${storyData.id}`);
+						const purchased = await checkPurchase(storyData.id);
+						console.log(`[StoryDetailPage] Purchase check result for storyId ${storyData.id}: ${purchased}`);
+						setHasAccess(purchased);
+					} catch (err) {
+						console.error('Failed to check purchase:', err);
+						// Fallback về localStorage check
+						const localAccess = Boolean(purchases[String(storyData.id)]);
+						console.log(`[StoryDetailPage] Fallback to localStorage check for storyId ${storyData.id}: ${localAccess}`);
+						setHasAccess(localAccess);
+					} finally {
+						setIsCheckingPurchase(false);
+					}
+				}
+
+				// Check follow status
+				if (isAuthenticated) {
+					try {
+						const followResponse = await api.get<{ following: boolean }>(endpoints.checkFollowing(storyData.id));
+						setIsFollowing(followResponse.data.following);
+					} catch (err) {
+						console.error('Failed to check follow status:', err);
+						setIsFollowing(false);
+					}
+				} else {
+					// Free story hoặc chưa đăng nhập
+					setHasAccess(!isPremium);
+				}
 
 				// Load chapters
 				const chaptersResponse = await api.get<ChapterResponse[]>(endpoints.chapters(storyId));
@@ -297,7 +339,6 @@ export default function StoryDetailPage() {
 	}, [comments, storyId]);
 
 	const hasMoreComments = displayedComments < allComments.length;
-	const hasAccess = Boolean(storyId && purchases[storyId as string]);
 
 	const formatPrice = (price?: number) =>
 		new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(price ?? 39000);
@@ -305,13 +346,45 @@ export default function StoryDetailPage() {
 	const handlePurchaseClick = () => {
 		if (!story) return;
 		openCheckout({
-			id: story.id,
+			id: String(story.id),
 			title: story.title,
 			price: story.price ?? 39000,
 		});
 	};
 
-		const canRead = !story?.isPremium || hasAccess;
+	const handleToggleFollow = async () => {
+		if (!story || !isAuthenticated || isTogglingFollow) return;
+
+		try {
+			setIsTogglingFollow(true);
+			if (isFollowing) {
+				await api.delete(endpoints.unfollowStory(story.id));
+				setIsFollowing(false);
+			} else {
+				await api.post(endpoints.followStory(story.id));
+				setIsFollowing(true);
+			}
+		} catch (err: any) {
+			console.error('Failed to toggle follow:', err);
+			const errorMessage = err.response?.data?.error || 'Không thể thực hiện thao tác. Vui lòng thử lại sau.';
+			alert(errorMessage);
+		} finally {
+			setIsTogglingFollow(false);
+		}
+	};
+
+	// Update hasAccess khi purchase thành công
+	useEffect(() => {
+		if (storyId && story?.isPremium) {
+			const storyIdStr = String(storyId);
+			const localHasAccess = Boolean(purchases[storyIdStr]);
+			if (localHasAccess && !hasAccess) {
+				setHasAccess(true);
+			}
+		}
+	}, [purchases, storyId, story?.isPremium, hasAccess]);
+
+	const canRead = !story?.isPremium || hasAccess;
 
 	// Get current user ID
 	const getCurrentUserId = (): number | null => {
@@ -654,41 +727,37 @@ export default function StoryDetailPage() {
 			const newReply = response.data;
 
 			// Load user info for new reply
+			let replyWithUser: CommentWithUser;
 			try {
 				const userResponse = await api.get<UserInfo>(endpoints.getUserById(newReply.userId));
 				const userData = userResponse.data;
 				
 				setUserInfoCache((prev) => new Map(prev).set(newReply.userId, userData));
 				
-				const replyWithUser: CommentWithUser = {
+				replyWithUser = {
 					...newReply,
 					user: {
 						username: userData.username,
 						avatarUrl: userData.avatarUrl,
 					},
 				};
-
-				// Add reply to replies map
-				setReplies((prev) => {
-					const newMap = new Map(prev);
-					const existingReplies = newMap.get(parentId) || [];
-					return newMap.set(parentId, [...existingReplies, replyWithUser]);
-				});
 			} catch (err) {
 				console.error('Failed to load user info for new reply:', err);
-				const replyWithUser: CommentWithUser = {
+				replyWithUser = {
 					...newReply,
 					user: {
 						username: `User ${newReply.userId}`,
 						avatarUrl: null,
 					},
 				};
-				setReplies((prev) => {
-					const newMap = new Map(prev);
-					const existingReplies = newMap.get(parentId) || [];
-					return newMap.set(parentId, [...existingReplies, replyWithUser]);
-				});
 			}
+
+			// Add reply to replies map
+			setReplies((prev) => {
+				const newMap = new Map(prev);
+				const existingReplies = newMap.get(parentId) || [];
+				return newMap.set(parentId, [...existingReplies, replyWithUser]);
+			});
 
 			setReplyContent('');
 			setReplyingToCommentId(null);
@@ -700,14 +769,7 @@ export default function StoryDetailPage() {
 				return newMap.set(parentId, currentCount + 1);
 			});
 			
-			// Nếu đang hiển thị replies, thêm reply mới vào
-			if (showReplies.has(parentId)) {
-				setReplies((prev) => {
-					const newMap = new Map(prev);
-					const existingReplies = newMap.get(parentId) || [];
-					return newMap.set(parentId, [...existingReplies, replyWithUser]);
-				});
-			}
+			// Nếu đang hiển thị replies, reply đã được thêm vào ở trên
 		} catch (err: any) {
 			console.error('Error creating reply:', err);
 			const errorMessage = err.response?.data?.message || err.message || 'Không thể gửi trả lời. Vui lòng thử lại sau.';
@@ -845,7 +907,13 @@ export default function StoryDetailPage() {
 	return (
 		<div className="space-y-10">
 			{story ? (
-				<section className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-950 text-white shadow-lg dark:border-zinc-800">
+				<section className={`relative overflow-hidden rounded-3xl border bg-zinc-950 text-white shadow-lg ${
+					story.isPremium 
+						? hasAccess
+							? 'border-emerald-400 border-2 shadow-emerald-200/30 dark:border-emerald-500 dark:shadow-emerald-500/30'
+							: 'border-amber-400 border-2 shadow-amber-200/30 dark:border-amber-500 dark:shadow-amber-500/30'
+						: 'border-zinc-200 dark:border-zinc-800'
+				}`}>
 					<div className="absolute inset-0">
 						<img
 							src={story.cover || 'https://picsum.photos/seed/placeholder/1200/680'}
@@ -865,9 +933,19 @@ export default function StoryDetailPage() {
 							/>
 						</div>
 						<div className="space-y-6">
-							<div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1 text-xs font-semibold uppercase tracking-wide text-amber-200">
+							<div className={`inline-flex items-center gap-2 rounded-full px-4 py-1 text-xs font-semibold uppercase tracking-wide ${
+								story.isPremium 
+									? hasAccess
+										? 'bg-emerald-500/20 text-emerald-200'
+										: 'bg-white/10 text-amber-200'
+									: 'bg-white/10 text-amber-200'
+							}`}>
 								{story.isPremium ? <Sparkles size={14} /> : <Flame size={14} />}
-								{story.isPremium ? 'Premium Series' : 'Đang thịnh hành'}
+								{story.isPremium 
+									? hasAccess 
+										? 'Đã sở hữu' 
+										: 'Premium Series'
+									: 'Đang thịnh hành'}
 							</div>
 							<div className="space-y-3">
 								<h1 className="text-3xl font-semibold sm:text-4xl">{story.title}</h1>
@@ -936,9 +1014,28 @@ export default function StoryDetailPage() {
 										Đọc từ chương mới nhất
 									</button>
 								)}
-								<button className="inline-flex items-center gap-2 rounded-full border border-white/30 px-5 py-2 font-medium text-white/90 transition hover:bg-white/10">
-									Lưu vào danh sách
-								</button>
+								{isAuthenticated ? (
+									<button
+										onClick={handleToggleFollow}
+										disabled={isTogglingFollow}
+										className={`inline-flex items-center gap-2 rounded-full border px-5 py-2 font-medium transition ${
+											isFollowing
+												? 'border-red-500/40 bg-red-500/20 text-red-200 hover:bg-red-500/30'
+												: 'border-white/30 text-white/90 hover:bg-white/10'
+										} ${isTogglingFollow ? 'opacity-50 cursor-not-allowed' : ''}`}
+									>
+										<Heart size={16} className={isFollowing ? 'fill-current' : ''} />
+										{isFollowing ? 'Đã theo dõi' : 'Theo dõi'}
+									</button>
+								) : (
+									<button
+										onClick={() => alert('Vui lòng đăng nhập để theo dõi truyện')}
+										className="inline-flex items-center gap-2 rounded-full border border-white/30 px-5 py-2 font-medium text-white/90 transition hover:bg-white/10"
+									>
+										<Heart size={16} />
+										Theo dõi
+									</button>
+								)}
 								{hasAccess && story.isPremium && purchaseRecord && (
 									<div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs font-medium text-emerald-200">
 										<Layers size={14} />

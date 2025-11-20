@@ -21,6 +21,7 @@ import {
 	Layers,
 	Coins,
 	Mail,
+	Heart,
 } from 'lucide-react';
 import { useWalletStore } from '@/shared/stores/walletStore';
 import { NotificationDropdown } from '@/components/notifications/NotificationDropdown';
@@ -68,6 +69,7 @@ export function Navbar() {
 			{ path: '/', label: 'Trang chủ', icon: Home },
 			{ path: '/hot', label: 'Truyện hot', icon: Flame },
 			{ path: '/categories', label: 'Thể loại', icon: Grid3x3 },
+			{ path: '/follows', label: 'Theo dõi', icon: Heart },
 			{ path: '/history', label: 'Lịch sử', icon: History },
 			{ path: '/ranking', label: 'Xếp hạng', icon: Trophy },
 			...(isAdmin ? [{ path: '/admin', label: 'Quản lý', icon: Layers }] : []),
