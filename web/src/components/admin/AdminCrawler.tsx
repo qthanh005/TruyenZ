@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { useToast } from '@/hooks/useToast';
 
 import { crawlerConfig } from '../../shared/config/env';
 
@@ -7,6 +8,7 @@ type CrawlType = 'title' | 'images';
 const formatTimestamp = () => `[${new Date().toLocaleTimeString()}]`;
 
 export default function AdminCrawler() {
+	const toast = useToast();
 	const [crawlUrl, setCrawlUrl] = useState('');
 	const [crawlType, setCrawlType] = useState<CrawlType>('title');
 	const [skipChapters, setSkipChapters] = useState(false);
@@ -42,7 +44,7 @@ export default function AdminCrawler() {
 	const handleStartCrawl = useCallback(async () => {
 		const url = crawlUrl.trim();
 		if (!url) {
-			alert('Vui lòng nhập URL');
+			toast.warning('Vui lòng nhập URL');
 			return;
 		}
 

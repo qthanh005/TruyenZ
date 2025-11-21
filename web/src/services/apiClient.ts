@@ -23,10 +23,7 @@ export function attachToken(user: User | null) {
 	api.interceptors.request.use((config) => {
 		// Ưu tiên OAuth token nếu có
 		if (user?.access_token) {
-			config.headers = {
-				...config.headers,
-				Authorization: `Bearer ${user.access_token}`,
-			};
+			config.headers['Authorization'] = `Bearer ${user.access_token}`;
 		} else {
 			// Fallback to localStorage token
 			const localToken = localStorage.getItem('auth_token');
@@ -47,11 +44,24 @@ export const endpoints = {
 	logout: () => '/api/auth/logout',
 	// User Service
 	me: () => '/api/user/me',
+	updateProfile: () => '/api/user/me',
+	uploadAvatar: () => '/api/user/avatar',
+	deleteAvatar: () => '/api/user/avatar',
 	profile: (userId: string) => `/api/user/${userId}`,
 	getUserById: (userId: string | number) => `/api/user/${userId}`,
 	bookmarks: () => '/api/user/bookmarks',
+	addBookmark: () => '/api/user/bookmarks',
+	removeBookmark: () => '/api/user/bookmarks',
+	checkBookmark: (storyId: string | number, chapterId: string | number) => `/api/user/bookmarks/check?storyId=${storyId}&chapterId=${chapterId}`,
+	getUserBookmarks: () => '/api/user/bookmarks',
+	getStoryBookmarks: (storyId: string | number) => `/api/user/bookmarks/story/${storyId}`,
 	history: () => '/api/user/history',
+	saveHistory: () => '/api/user/history',
+	deleteHistory: (storyId: string | number) => `/api/user/history/${storyId}`,
+	deleteAllHistory: () => '/api/user/history',
 	balance: () => '/api/user/balance',
+	getAllUsers: () => '/api/user/admin/all',
+	updateUser: (userId: string | number) => `/api/user/admin/${userId}`,
 	// Follow Service
 	followStory: (storyId: string | number) => `/api/user/follow/${storyId}`,
 	unfollowStory: (storyId: string | number) => `/api/user/follow/${storyId}`,
@@ -61,9 +71,23 @@ export const endpoints = {
 	// Story Service
 	stories: () => '/api/story',
 	storyDetail: (id: string) => `/api/story/${id}`,
+	updateStory: (id: string | number) => `/api/story/${id}`,
+	deleteStory: (id: string | number) => `/api/story/${id}`,
 	chapters: (storyId: string) => `/api/story/${storyId}/chapters`,
 	chapterById: (chapterId: string) => `/api/story/chapters/${chapterId}`,
 	chapterContent: (storyId: string, chapterId: string) => `/api/story/${storyId}/chapters/${chapterId}`,
+	deleteChapter: (storyId: string | number, chapterId: string | number) => `/api/story/${storyId}/chapters/${chapterId}`,
+	deleteChapterImages: (storyId: string | number, chapterNumber: number, index?: number, filename?: string) => {
+		const baseUrl = `/api/story/${storyId}/chapters/${chapterNumber}/images`;
+		const params = new URLSearchParams();
+		if (index !== undefined) params.append('index', String(index + 1)); // API expects 1-based index
+		if (filename) {
+			// API accepts filename as array
+			params.append('filename', filename);
+		}
+		const query = params.toString();
+		return `${baseUrl}${query ? '?' + query : ''}`;
+	},
 	searchStories: (q: string) => `/api/story/search?title=${encodeURIComponent(q)}`,
 	checkStoryPurchase: (storyId: string | number) => `/api/story/${storyId}/purchase/check`,
 	getAllGenres: () => '/api/story/genres',
@@ -75,6 +99,10 @@ export const endpoints = {
 		const query = params.toString();
 		return `/api/story/genre/${encodedGenre}${query ? '?' + query : ''}`;
 	},
+	getAdminGenres: () => '/api/story/admin/genres',
+	createGenre: () => '/api/story/admin/genres',
+	updateGenre: (genreId: string | number) => `/api/story/admin/genres/${genreId}`,
+	deleteGenre: (genreId: string | number) => `/api/story/admin/genres/${genreId}`,
 
 	// Comment Service
 	createComment: () => '/api/comments',

@@ -1,4 +1,18 @@
 import { useEffect, useState } from 'react';
+import { api, endpoints } from '@/services/apiClient';
+
+type StoryResponse = {
+	id: number;
+	title: string;
+};
+
+type ChapterResponse = {
+	id: number;
+	storyId: number;
+	chapterNumber: number;
+	title: string;
+	imageIds?: string[];
+};
 
 type Chapter = {
 	id: number;
@@ -19,43 +33,52 @@ export default function AdminChapters() {
 	const pageSize = 10;
 
 	useEffect(() => {
-		// Mock data
-		const timer = setTimeout(() => {
-			setChapters([
-				{
-					id: 1,
-					comic_id: 1,
-					comic_title: 'Đại Chúa Tể',
-					chapter_number: 125,
-					title: 'Chương 125',
-					views: 15000,
-					status: 'Published',
-					created_at: '2024-01-15 10:00:00',
-				},
-				{
-					id: 2,
-					comic_id: 1,
-					comic_title: 'Đại Chúa Tể',
-					chapter_number: 124,
-					title: 'Chương 124',
-					views: 18000,
-					status: 'Published',
-					created_at: '2024-01-14 10:00:00',
-				},
-				{
-					id: 3,
-					comic_id: 2,
-					comic_title: 'Thám Tử Conan',
-					chapter_number: 1100,
-					title: 'Chương 1100',
-					views: 22000,
-					status: 'Published',
-					created_at: '2024-01-13 10:00:00',
-				},
-			]);
-			setLoading(false);
-		}, 500);
-		return () => clearTimeout(timer);
+		const loadChapters = async () => {
+			try {
+				setLoading(true);
+				// Load all stories first
+				const storiesResponse = await api.get<StoryResponse[]>(endpoints.stories());
+				const stories = storiesResponse.data;
+				
+				// Load chapters for each story
+				const allChapters: Chapter[] = [];
+				for (const story of stories) {
+					try {
+						const chaptersResponse = await api.get<ChapterResponse[]>(endpoints.chapters(String(story.id)));
+						const storyChapters = chaptersResponse.data.map((ch) => ({
+							id: ch.id,
+							comic_id: ch.storyId,
+							comic_title: story.title,
+							chapter_number: ch.chapterNumber,
+							title: ch.title || `Chương ${ch.chapterNumber}`,
+							views: 0, // Not available from API yet
+							status: 'Published', // Default status
+							created_at: new Date().toLocaleString('vi-VN'), // Default date
+						}));
+						allChapters.push(...storyChapters);
+					} catch (error) {
+						console.error(`Error loading chapters for story ${story.id}:`, error);
+					}
+				}
+				
+				// Sort by story ID and chapter number
+				allChapters.sort((a, b) => {
+					if (a.comic_id !== b.comic_id) {
+						return a.comic_id - b.comic_id;
+					}
+					return a.chapter_number - b.chapter_number;
+				});
+				
+				setChapters(allChapters);
+			} catch (error) {
+				console.error('Error loading chapters:', error);
+				setChapters([]);
+			} finally {
+				setLoading(false);
+			}
+		};
+
+		loadChapters();
 	}, []);
 
 	const filteredChapters =

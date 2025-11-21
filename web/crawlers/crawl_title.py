@@ -281,6 +281,102 @@ def create_chapter_in_db(story_id: int, chapter_number: int, title: str, image_i
         cursor.close()
         conn.close()
 
+
+def sanitize_genre_name(name: str) -> Optional[str]:
+    if not name:
+        return None
+    cleaned = name.strip()
+    return cleaned or None
+
+
+def ensure_genres_via_api(genres: List[str], service_url: str = None):
+    normalized = [sanitize_genre_name(g) for g in genres]
+    normalized = [g for g in normalized if g]
+    if not normalized:
+        return
+
+    service_url = (service_url or STORY_SERVICE_URL).rstrip("/")
+    endpoint = f"{service_url}/api/story/admin/genres"
+    existing = {}
+
+    try:
+        response = requests.get(endpoint, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, list):
+            for item in data:
+                key = (item.get("name") or "").strip().lower()
+                if key:
+                    existing[key] = True
+    except Exception as e:
+        print(f"⚠ Không thể tải danh sách thể loại từ API: {e}")
+
+    for name in normalized:
+        key = name.lower()
+        if existing.get(key):
+            continue
+        payload = {"name": name}
+        try:
+            response = requests.post(endpoint, json=payload, timeout=15)
+            response.raise_for_status()
+            created = response.json()
+            created_name = (created.get("name") or "").strip().lower()
+            if created_name:
+                existing[created_name] = True
+            print(f"✓ Đã thêm thể loại mới qua API: {name}")
+        except Exception as e:
+            print(f"⚠ Không thể thêm thể loại '{name}' qua API: {e}")
+
+
+def _generate_unique_slug_db(cursor, base_slug: str) -> str:
+    if not base_slug:
+        base_slug = "genre"
+    candidate = base_slug
+    counter = 1
+    while True:
+        cursor.execute("SELECT 1 FROM genres WHERE slug = %s", (candidate,))
+        if cursor.fetchone() is None:
+            return candidate
+        candidate = f"{base_slug}-{counter}"
+        counter += 1
+
+
+def ensure_genres_in_db(genres: List[str]):
+    if not PSYCOPG2_AVAILABLE:
+        return
+    normalized = [sanitize_genre_name(g) for g in genres]
+    normalized = [g for g in normalized if g]
+    if not normalized:
+        return
+
+    conn = get_db_connection()
+    if not conn:
+        return
+
+    try:
+        cursor = conn.cursor()
+        for name in normalized:
+            cursor.execute("SELECT 1 FROM genres WHERE LOWER(name) = LOWER(%s)", (name,))
+            if cursor.fetchone():
+                continue
+            slug = _generate_unique_slug_db(cursor, slugify(name))
+            now = datetime.now()
+            cursor.execute(
+                """
+                INSERT INTO genres (name, slug, description, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (name, slug, None, now, now)
+            )
+            print(f"✓ Đã thêm thể loại mới vào bảng genres: {name}")
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"⚠ Lỗi khi đồng bộ thể loại vào bảng genres: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
 def print_comic_summary(comic_data: Dict):
     print("\n--- Thông tin truyện đã crawl ---")
     for key, value in comic_data.items():
@@ -385,6 +481,15 @@ def crawl_truyen_info(url: str, crawl_chapters: bool = True, skip_api: bool = Fa
         follows = get_info_by_icon(soup, "fa-heart")
         views = get_info_by_icon(soup, "fa-eye")
         genres = [a.text.strip() for a in soup.select("ul.list01 li.li03 a")]
+        genres = [g for g in genres if g]
+
+        service_url = service_url or STORY_SERVICE_URL
+        user_id = user_id or STORY_SERVICE_USER_ID
+        if genres:
+            if use_db and PSYCOPG2_AVAILABLE:
+                ensure_genres_in_db(genres)
+            else:
+                ensure_genres_via_api(genres, service_url)
 
         # Tải ảnh bìa - lưu với tên "cover.jpg" để khớp với story-service
         cover_path = download_image(cover, save_directory, "cover.jpg")
@@ -406,8 +511,6 @@ def crawl_truyen_info(url: str, crawl_chapters: bool = True, skip_api: bool = Fa
 
         # Tạo story trong database TRƯỚC khi crawl chapters (để có thể lưu từng chapter ngay)
         story_id = None
-        service_url = service_url or STORY_SERVICE_URL
-        user_id = user_id or STORY_SERVICE_USER_ID
         
         if not skip_api:
             if use_db and PSYCOPG2_AVAILABLE:

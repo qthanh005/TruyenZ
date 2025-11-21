@@ -2,6 +2,8 @@ import { Route, Routes, Navigate } from 'react-router-dom';
 import { ThemeProvider } from '@/providers/ThemeProvider';
 import { AuthProvider, useAuth } from '@/providers/AuthProvider';
 import { Layout } from '@/components/Layout';
+import { ToastProvider } from '@/components/ToastProvider';
+import { ConfirmationProvider } from '@/components/ConfirmationProvider';
 import HomePage from '@/pages/HomePage';
 import StoryDetailPage from '@/pages/StoryDetailPage';
 import ChapterReaderPage from '@/pages/ChapterReaderPage';
@@ -43,6 +45,8 @@ export default function App() {
 	return (
 		<AuthProvider>
 			<ThemeProvider>
+				<ToastProvider />
+				<ConfirmationProvider />
 				<Routes>
 					{/* Admin routes - no navbar/footer */}
 					<Route

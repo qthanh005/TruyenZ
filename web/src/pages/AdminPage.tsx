@@ -1,15 +1,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/providers/AuthProvider';
-import { LayoutDashboard, BookOpen, FileText, Users, Tags, Bot, Shield, ArrowLeft, Home } from 'lucide-react';
+import { LayoutDashboard, BookOpen, Users, Tags, Bot, Shield, ArrowLeft, Home } from 'lucide-react';
 import AdminDashboard from '@/components/admin/AdminDashboard';
 import AdminComics from '@/components/admin/AdminComics';
-import AdminChapters from '@/components/admin/AdminChapters';
 import AdminUsers from '@/components/admin/AdminUsers';
 import AdminGenres from '@/components/admin/AdminGenres';
 import AdminCrawler from '@/components/admin/AdminCrawler';
 
-type AdminTab = 'dashboard' | 'comics' | 'chapters' | 'users' | 'genres' | 'crawler';
+type AdminTab = 'dashboard' | 'comics' | 'users' | 'genres' | 'crawler';
 
 export default function AdminPage() {
 	const { user } = useAuth();
@@ -17,8 +16,7 @@ export default function AdminPage() {
 
 	const tabs: { id: AdminTab; label: string; icon: typeof LayoutDashboard }[] = [
 		{ id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
-		{ id: 'comics', label: 'Quản lý truyện', icon: BookOpen },
-		{ id: 'chapters', label: 'Quản lý chương', icon: FileText },
+		{ id: 'comics', label: 'Quản lý truyện & chương', icon: BookOpen },
 		{ id: 'users', label: 'Quản lý người dùng', icon: Users },
 		{ id: 'genres', label: 'Thể loại', icon: Tags },
 		{ id: 'crawler', label: 'Crawler', icon: Bot },
@@ -30,8 +28,6 @@ export default function AdminPage() {
 				return <AdminDashboard />;
 			case 'comics':
 				return <AdminComics />;
-			case 'chapters':
-				return <AdminChapters />;
 			case 'users':
 				return <AdminUsers />;
 			case 'genres':

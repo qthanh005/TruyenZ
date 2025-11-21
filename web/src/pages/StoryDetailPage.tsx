@@ -1,11 +1,17 @@
+import '@/setupGlobal';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Flame, Layers, Lock, Sparkles, Star, Users, Trash2, Reply, X, Heart } from 'lucide-react';
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
 
 import { CheckoutModal } from '@/components/payments/CheckoutModal';
 import { usePremiumStore } from '@/shared/stores/premiumStore';
 import { api, endpoints } from '@/services/apiClient';
+import { apiConfig } from '@/shared/config/env';
 import { useAuth } from '@/providers/AuthProvider';
+import { useToast } from '@/hooks/useToast';
+import { useConfirm } from '@/hooks/useConfirm';
 import type { CommentResponse, CommentRequest, CommentWithUser } from '@/types/comment';
 import type { UserInfo } from '@/types/user';
 
@@ -47,27 +53,40 @@ const mockStats = {
 	updatedAt: 'Cập nhật 2 giờ trước',
 };
 
-const mockRecommendations = [
-	{
-		id: '5',
-		title: 'Solo Leveling',
-		cover: 'https://picsum.photos/seed/reco-1/160/220',
-		description: 'Tiến trình nâng cấp không điểm dừng.',
-	},
-	{
-		id: '6',
-		title: 'Kimetsu no Yaiba',
-		cover: 'https://picsum.photos/seed/reco-2/160/220',
-		description: 'Diệt quỷ cứu em gái.',
-	},
-];
+const COMMENT_WS_ENDPOINT = import.meta.env.VITE_COMMENT_WS_URL ?? 'http://localhost:8883/ws/comments';
+const buildStoryCommentTopic = (storyId?: string) =>
+	`/topic/comments/${storyId ? `story-${storyId}` : 'story-unknown'}`;
+
+// Helper function to convert avatar URL to full URL
+const getAvatarUrl = (avatarUrl?: string | null): string | null => {
+	if (!avatarUrl) {
+		return null;
+	}
+	if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://')) {
+		return avatarUrl;
+	}
+	// If it's a relative path, prepend gateway URL
+	const gatewayUrl = import.meta.env.VITE_API_GATEWAY_URL || 'http://localhost:8081';
+	return avatarUrl.startsWith('/') ? `${gatewayUrl}${avatarUrl}` : `${gatewayUrl}/${avatarUrl}`;
+};
+
+type SimilarStory = {
+	id: number;
+	title: string;
+	cover?: string;
+	description?: string;
+};
 
 export default function StoryDetailPage() {
 	const { storyId } = useParams();
+	const toast = useToast();
+	const confirm = useConfirm();
 	const [story, setStory] = useState<Story | null>(null);
 	const [chapters, setChapters] = useState<Chapter[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [similarStories, setSimilarStories] = useState<SimilarStory[]>([]);
+	const [loadingSimilarStories, setLoadingSimilarStories] = useState(false);
 	const [comments, setComments] = useState<CommentWithUser[]>([]);
 	const [allComments, setAllComments] = useState<CommentWithUser[]>([]); // Tất cả comments đã load
 	const [totalComments, setTotalComments] = useState(0);
@@ -89,6 +108,7 @@ export default function StoryDetailPage() {
 	const [replyingToReplyId, setReplyingToReplyId] = useState<number | null>(null); // Đang reply reply nào
 	const [replyToReplyContent, setReplyToReplyContent] = useState(''); // Nội dung reply của reply
 	const [displayedComments, setDisplayedComments] = useState(5); // Số comments hiển thị (infinite scroll)
+	const [commentsReloadKey, setCommentsReloadKey] = useState(0);
 	const openCheckout = usePremiumStore((state) => state.openCheckout);
 	const purchases = usePremiumStore((state) => state.purchases);
 	const checkPurchase = usePremiumStore((state) => state.checkPurchase);
@@ -100,7 +120,7 @@ export default function StoryDetailPage() {
 	const [isTogglingFollow, setIsTogglingFollow] = useState(false);
 
 	// Load story details from API
-	useEffect(() => {
+		useEffect(() => {
 		if (!storyId) return;
 
 		const loadStory = async () => {
@@ -194,13 +214,82 @@ export default function StoryDetailPage() {
 		loadStory();
 	}, [storyId]);
 
+	// Load similar stories based on genres
+	useEffect(() => {
+		if (!story || !story.genres || story.genres.length === 0) {
+			setSimilarStories([]);
+			return;
+		}
+
+		const loadSimilarStories = async () => {
+			try {
+				setLoadingSimilarStories(true);
+				const currentStoryId = Number(storyId);
+				
+				// Fetch stories for each genre
+				const genrePromises = story.genres!.map((genre) =>
+					api.get<StoryResponse[]>(endpoints.getStoriesByGenre(genre, 0, 10))
+						.then((res) => res.data)
+						.catch((err) => {
+							console.error(`Failed to load stories for genre ${genre}:`, err);
+							return [] as StoryResponse[];
+						})
+				);
+
+				const genreResults = await Promise.allSettled(genrePromises);
+				const allStories: StoryResponse[] = [];
+
+				// Collect all stories from all genres
+				genreResults.forEach((result) => {
+					if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+						allStories.push(...result.value);
+					}
+				});
+
+				// Remove duplicates and current story
+				const uniqueStoriesMap = new Map<number, StoryResponse>();
+				allStories.forEach((s) => {
+					if (s.id !== currentStoryId && !uniqueStoriesMap.has(s.id)) {
+						uniqueStoriesMap.set(s.id, s);
+					}
+				});
+
+				// Convert to SimilarStory format
+				const gatewayUrl = (import.meta as any).env?.VITE_API_GATEWAY_URL || 'http://localhost:8081';
+				const similar: SimilarStory[] = Array.from(uniqueStoriesMap.values())
+					.slice(0, 6) // Limit to 6 stories
+					.map((s) => ({
+						id: s.id,
+						title: s.title,
+						cover: s.coverImageId
+							? `${gatewayUrl}${s.coverImageId}`
+							: `https://picsum.photos/seed/story-${s.id}/160/220`,
+						description: s.description || undefined,
+					}));
+
+				setSimilarStories(similar);
+			} catch (err) {
+				console.error('Error loading similar stories:', err);
+				setSimilarStories([]);
+			} finally {
+				setLoadingSimilarStories(false);
+			}
+		};
+
+		loadSimilarStories();
+	}, [story, storyId]);
+
 	// Load comments from API với cấu trúc phân cấp
 	useEffect(() => {
 		if (!storyId) return;
 
 		const loadComments = async () => {
 			try {
-				setCommentLoading(true);
+				// Chỉ hiển thị loading spinner khi load lần đầu (commentsReloadKey === 0)
+				// Khi reload từ realtime update, không hiển thị loading để tránh cảm giác "reload page"
+				if (commentsReloadKey === 0) {
+					setCommentLoading(true);
+				}
 				setCommentError(null);
 
 				// Get root comments by story ID (comments without chapterId or parentId)
@@ -263,8 +352,11 @@ export default function StoryDetailPage() {
 				setAllComments(rootCommentsWithUser);
 				setReplyCounts(replyCountsMap);
 				setTotalComments(rootCommentsWithUser.length);
-				// Reset displayedComments khi load lại
-				setDisplayedComments(5);
+				// Không reset displayedComments khi reload để tránh UI "nhảy"
+				// Chỉ reset nếu đây là lần load đầu tiên (commentsReloadKey === 0)
+				if (commentsReloadKey === 0) {
+					setDisplayedComments(5);
+				}
 			} catch (err: any) {
 				console.error('Error loading comments:', err);
 				console.error('Error details:', {
@@ -303,6 +395,46 @@ export default function StoryDetailPage() {
 		};
 
 		loadComments();
+	}, [storyId, commentsReloadKey]);
+
+	useEffect(() => {
+		if (!storyId) return;
+		const numericStoryId = Number(storyId);
+		if (Number.isNaN(numericStoryId)) return;
+		const topic = buildStoryCommentTopic(storyId);
+
+		const client = new Client({
+			webSocketFactory: () => new SockJS(COMMENT_WS_ENDPOINT),
+			reconnectDelay: 5000,
+		});
+
+		let subscription: { unsubscribe: () => void } | null = null;
+
+		client.onConnect = () => {
+			subscription = client.subscribe(topic, (message: { body: string }) => {
+				try {
+					const payload = JSON.parse(message.body);
+					const payloadStoryId = payload?.storyId ?? payload?.comment?.storyId;
+					if (payloadStoryId !== undefined && Number(payloadStoryId) !== numericStoryId) {
+						return;
+					}
+					setCommentsReloadKey((prev) => prev + 1);
+				} catch (err) {
+					console.error('Không thể parse realtime comment:', err);
+				}
+			});
+		};
+
+		client.onStompError = (frame: { headers?: Record<string, unknown>; body?: string }) => {
+			console.error('Comment WebSocket error', frame);
+		};
+
+		client.activate();
+
+		return () => {
+			subscription?.unsubscribe();
+			client.deactivate();
+		};
 	}, [storyId]);
 
 	// Cập nhật comments hiển thị khi displayedComments thay đổi
@@ -367,7 +499,7 @@ export default function StoryDetailPage() {
 		} catch (err: any) {
 			console.error('Failed to toggle follow:', err);
 			const errorMessage = err.response?.data?.error || 'Không thể thực hiện thao tác. Vui lòng thử lại sau.';
-			alert(errorMessage);
+			toast.error(errorMessage);
 		} finally {
 			setIsTogglingFollow(false);
 		}
@@ -416,13 +548,16 @@ export default function StoryDetailPage() {
 
 	// Handle delete comment
 	const handleDeleteComment = async (commentId: number) => {
-		if (!confirm('Bạn có chắc chắn muốn xóa bình luận này?')) {
-			return;
-		}
+		const confirmed = await confirm.confirm(
+			'Bạn có chắc chắn muốn xóa bình luận này?',
+			'danger',
+			'Xác nhận xóa bình luận'
+		);
+		if (!confirmed) return;
 
 		const currentUserId = getCurrentUserId();
 		if (!currentUserId) {
-			alert('Bạn cần đăng nhập để xóa bình luận');
+			toast.warning('Bạn cần đăng nhập để xóa bình luận');
 			return;
 		}
 
@@ -439,7 +574,7 @@ export default function StoryDetailPage() {
 			console.error('Error deleting comment:', err);
 			// Backend trả về error trong response.data.error
 			const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Không thể xóa bình luận. Vui lòng thử lại sau.';
-			alert(errorMessage);
+			toast.error(errorMessage);
 		} finally {
 			setDeletingCommentId(null);
 		}
@@ -593,7 +728,7 @@ export default function StoryDetailPage() {
 	const handleReplyToReply = async (replyId: number) => {
 		if (!storyId || !replyToReplyContent.trim() || !isAuthenticated || !user) {
 			if (!isAuthenticated) {
-				alert('Vui lòng đăng nhập để trả lời');
+				toast.warning('Vui lòng đăng nhập để trả lời');
 			}
 			return;
 		}
@@ -605,12 +740,12 @@ export default function StoryDetailPage() {
 		} else if (user.profile?.sub) {
 			userId = parseInt(user.profile.sub, 10);
 		} else {
-			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			toast.error('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
 			return;
 		}
 
 		if (isNaN(userId)) {
-			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			toast.error('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
 			return;
 		}
 
@@ -682,7 +817,7 @@ export default function StoryDetailPage() {
 		} catch (err: any) {
 			console.error('Error creating nested reply:', err);
 			const errorMessage = err.response?.data?.message || err.message || 'Không thể gửi trả lời. Vui lòng thử lại sau.';
-			alert(errorMessage);
+			toast.error(errorMessage);
 		} finally {
 			setSubmittingComment(false);
 		}
@@ -691,7 +826,7 @@ export default function StoryDetailPage() {
 	const handleReply = async (parentId: number) => {
 		if (!storyId || !replyContent.trim() || !isAuthenticated || !user) {
 			if (!isAuthenticated) {
-				alert('Vui lòng đăng nhập để trả lời');
+				toast.warning('Vui lòng đăng nhập để trả lời');
 			}
 			return;
 		}
@@ -703,12 +838,12 @@ export default function StoryDetailPage() {
 		} else if (user.profile?.sub) {
 			userId = parseInt(user.profile.sub, 10);
 		} else {
-			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			toast.error('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
 			return;
 		}
 
 		if (isNaN(userId)) {
-			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			toast.error('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
 			return;
 		}
 
@@ -773,7 +908,7 @@ export default function StoryDetailPage() {
 		} catch (err: any) {
 			console.error('Error creating reply:', err);
 			const errorMessage = err.response?.data?.message || err.message || 'Không thể gửi trả lời. Vui lòng thử lại sau.';
-			alert(errorMessage);
+			toast.error(errorMessage);
 		} finally {
 			setSubmittingComment(false);
 		}
@@ -782,7 +917,7 @@ export default function StoryDetailPage() {
 	const handleAddComment = async () => {
 		if (!storyId || !newComment.trim() || !isAuthenticated || !user) {
 			if (!isAuthenticated) {
-				alert('Vui lòng đăng nhập để bình luận');
+				toast.warning('Vui lòng đăng nhập để bình luận');
 			}
 			return;
 		}
@@ -797,13 +932,13 @@ export default function StoryDetailPage() {
 			userId = parseInt(user.profile.sub, 10);
 		} else {
 			console.error('Cannot get userId from user object');
-			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			toast.error('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
 			return;
 		}
 
 		if (isNaN(userId)) {
 			console.error('Invalid userId:', user);
-			alert('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			toast.error('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
 			return;
 		}
 
@@ -871,7 +1006,7 @@ export default function StoryDetailPage() {
 		} catch (err: any) {
 			console.error('Error creating comment:', err);
 			const errorMessage = err.response?.data?.message || err.message || 'Không thể gửi bình luận. Vui lòng thử lại sau.';
-			alert(errorMessage);
+			toast.error(errorMessage);
 		} finally {
 			setSubmittingComment(false);
 		}
@@ -1029,7 +1164,7 @@ export default function StoryDetailPage() {
 									</button>
 								) : (
 									<button
-										onClick={() => alert('Vui lòng đăng nhập để theo dõi truyện')}
+										onClick={() => toast.warning('Vui lòng đăng nhập để theo dõi truyện')}
 										className="inline-flex items-center gap-2 rounded-full border border-white/30 px-5 py-2 font-medium text-white/90 transition hover:bg-white/10"
 									>
 										<Heart size={16} />
@@ -1114,33 +1249,58 @@ export default function StoryDetailPage() {
 						</div>
 					</div>
 
-					<div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-						<h3 className="text-lg font-semibold text-zinc-900 dark:text-white">Bộ sưu tập tương tự</h3>
-						<p className="mt-1 text-sm text-zinc-500">Gợi ý dựa trên thể loại và mức độ thịnh hành.</p>
-						<div className="mt-4 grid gap-4 sm:grid-cols-2">
-							{mockRecommendations.map((item) => (
-								<Link
-									key={item.id}
-									to={`/story/${item.id}`}
-									className="group overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50/80 transition hover:-translate-y-1 hover:border-brand/40 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/60"
-								>
-									<div className="aspect-[3/4] w-full overflow-hidden">
-										<img
-											src={item.cover}
-											alt={item.title}
-											className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-											loading="lazy"
-										/>
-									</div>
-									<div className="space-y-1 p-3">
-										<p className="text-sm font-semibold text-zinc-800 transition group-hover:text-brand dark:text-white">
-											{item.title}
-										</p>
-										<p className="text-xs text-zinc-500 dark:text-zinc-400">{item.description}</p>
-									</div>
-								</Link>
-							))}
+					<div className="rounded-2xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50/50 p-4 shadow-sm dark:border-zinc-800 dark:from-zinc-950 dark:to-zinc-900/50">
+						<div className="mb-3 flex items-center gap-2">
+							<Sparkles className="h-4 w-4 text-brand" />
+							<h3 className="text-base font-semibold text-zinc-900 dark:text-white">Truyện tương tự</h3>
 						</div>
+						{loadingSimilarStories ? (
+							<div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+								{[...Array(4)].map((_, i) => (
+									<div
+										key={i}
+										className="flex-shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+										style={{ width: '140px' }}
+									>
+										<div className="aspect-[2/3] w-full animate-pulse bg-zinc-200 dark:bg-zinc-800" />
+										<div className="p-2">
+											<div className="mb-1 h-3 w-full animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+											<div className="h-2 w-2/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+										</div>
+									</div>
+								))}
+							</div>
+						) : similarStories.length > 0 ? (
+							<div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+								{similarStories.map((item) => (
+									<Link
+										key={item.id}
+										to={`/story/${item.id}`}
+										className="group flex-shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:border-brand/40 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900"
+										style={{ width: '140px' }}
+									>
+										<div className="relative aspect-[2/3] w-full overflow-hidden">
+											<img
+												src={item.cover || `https://picsum.photos/seed/story-${item.id}/160/220`}
+												alt={item.title}
+												className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
+												loading="lazy"
+											/>
+											<div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+										</div>
+										<div className="p-2.5">
+											<p className="line-clamp-2 text-xs font-semibold leading-tight text-zinc-800 transition-colors group-hover:text-brand dark:text-white">
+												{item.title}
+											</p>
+										</div>
+									</Link>
+								))}
+							</div>
+						) : (
+							<div className="py-6 text-center text-xs text-zinc-500">
+								Chưa có truyện tương tự nào được tìm thấy.
+							</div>
+						)}
 					</div>
 				</div>
 
@@ -1203,17 +1363,27 @@ export default function StoryDetailPage() {
 										<div key={comment.id} id={String(comment.id)} className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
 											<div className="flex items-start justify-between gap-3">
 												<div className="flex items-center gap-3 flex-1">
-													{comment.user?.avatarUrl ? (
+													{getAvatarUrl(comment.user?.avatarUrl) ? (
 														<img
-															src={comment.user.avatarUrl}
-															alt={comment.user.username}
+															src={getAvatarUrl(comment.user?.avatarUrl)!}
+															alt={comment.user?.username || 'User'}
 															className="h-10 w-10 rounded-full object-cover"
+															onError={(e) => {
+																const target = e.target as HTMLImageElement;
+																target.style.display = 'none';
+																const parent = target.parentElement;
+																if (parent) {
+																	const fallback = parent.querySelector('.avatar-fallback');
+																	if (fallback) {
+																		(fallback as HTMLElement).style.display = 'flex';
+																	}
+																}
+															}}
 														/>
-													) : (
-														<div className="h-10 w-10 rounded-full bg-brand/20 flex items-center justify-center text-brand font-semibold text-sm">
-															{comment.user?.username?.charAt(0).toUpperCase() || 'U'}
-														</div>
-													)}
+													) : null}
+													<div className={`h-10 w-10 rounded-full bg-brand/20 flex items-center justify-center text-brand font-semibold text-sm avatar-fallback ${getAvatarUrl(comment.user?.avatarUrl) ? 'hidden' : ''}`}>
+														{(comment.user?.username || 'U').charAt(0).toUpperCase()}
+													</div>
 													<div className="flex-1">
 														<div className="flex items-center gap-2">
 															<p className="text-sm font-semibold text-zinc-800 dark:text-white">
@@ -1338,17 +1508,27 @@ export default function StoryDetailPage() {
 															<div key={reply.id} className="space-y-2">
 																<div className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
 																	<div className="flex items-center gap-2">
-																		{reply.user?.avatarUrl ? (
+																		{getAvatarUrl(reply.user?.avatarUrl) ? (
 																			<img
-																				src={reply.user.avatarUrl}
-																				alt={reply.user.username}
+																				src={getAvatarUrl(reply.user?.avatarUrl)!}
+																				alt={reply.user?.username || 'User'}
 																				className="h-8 w-8 rounded-full object-cover"
+																				onError={(e) => {
+																					const target = e.target as HTMLImageElement;
+																					target.style.display = 'none';
+																					const parent = target.parentElement;
+																					if (parent) {
+																						const fallback = parent.querySelector('.avatar-fallback');
+																						if (fallback) {
+																							(fallback as HTMLElement).style.display = 'flex';
+																						}
+																					}
+																				}}
 																			/>
-																		) : (
-																			<div className="h-8 w-8 rounded-full bg-brand/20 flex items-center justify-center text-brand font-semibold text-xs">
-																				{reply.user?.username?.charAt(0).toUpperCase() || 'U'}
-																			</div>
-																		)}
+																		) : null}
+																		<div className={`h-8 w-8 rounded-full bg-brand/20 flex items-center justify-center text-brand font-semibold text-xs avatar-fallback ${getAvatarUrl(reply.user?.avatarUrl) ? 'hidden' : ''}`}>
+																			{(reply.user?.username || 'U').charAt(0).toUpperCase()}
+																		</div>
 																		<div className="flex-1">
 																			<p className="text-xs font-semibold text-zinc-800 dark:text-white">
 																				{reply.user?.username || `User ${reply.userId}`}
@@ -1456,17 +1636,27 @@ export default function StoryDetailPage() {
 																			nestedReplies.get(reply.id)!.map((nestedReply) => (
 																				<div key={nestedReply.id} className="rounded-lg border border-zinc-200 bg-zinc-50/30 p-2 dark:border-zinc-800 dark:bg-zinc-900/30">
 																					<div className="flex items-center gap-2">
-																						{nestedReply.user?.avatarUrl ? (
+																						{getAvatarUrl(nestedReply.user?.avatarUrl) ? (
 																							<img
-																								src={nestedReply.user.avatarUrl}
-																								alt={nestedReply.user.username}
+																								src={getAvatarUrl(nestedReply.user?.avatarUrl)!}
+																								alt={nestedReply.user?.username || 'User'}
 																								className="h-6 w-6 rounded-full object-cover"
+																								onError={(e) => {
+																									const target = e.target as HTMLImageElement;
+																									target.style.display = 'none';
+																									const parent = target.parentElement;
+																									if (parent) {
+																										const fallback = parent.querySelector('.avatar-fallback');
+																										if (fallback) {
+																											(fallback as HTMLElement).style.display = 'flex';
+																										}
+																									}
+																								}}
 																							/>
-																						) : (
-																							<div className="h-6 w-6 rounded-full bg-brand/20 flex items-center justify-center text-brand font-semibold text-[10px]">
-																								{nestedReply.user?.username?.charAt(0).toUpperCase() || 'U'}
-																							</div>
-																						)}
+																						) : null}
+																						<div className={`h-6 w-6 rounded-full bg-brand/20 flex items-center justify-center text-brand font-semibold text-[10px] avatar-fallback ${getAvatarUrl(nestedReply.user?.avatarUrl) ? 'hidden' : ''}`}>
+																							{(nestedReply.user?.username || 'U').charAt(0).toUpperCase()}
+																						</div>
 																						<div className="flex-1">
 																							<p className="text-[10px] font-semibold text-zinc-800 dark:text-white">
 																								{nestedReply.user?.username || `User ${nestedReply.userId}`}

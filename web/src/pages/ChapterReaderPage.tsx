@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api, endpoints } from '@/services/apiClient';
+import { useAuth } from '@/providers/AuthProvider';
 import { ChevronLeft, ChevronRight, ArrowLeft, List, X } from 'lucide-react';
 
 type ChapterResponse = {
@@ -24,6 +25,7 @@ type Chapter = {
 export default function ChapterReaderPage() {
 	const { storyId, chapterId } = useParams();
 	const navigate = useNavigate();
+	const { isAuthenticated } = useAuth();
 	const [chapter, setChapter] = useState<Chapter | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -31,6 +33,27 @@ export default function ChapterReaderPage() {
 	const [chaptersLoaded, setChaptersLoaded] = useState(false);
 	const [showChapterList, setShowChapterList] = useState(false);
 	const chapterListRef = useRef<HTMLDivElement>(null);
+
+	// Save reading history when chapter is loaded successfully
+	const saveReadingHistory = useCallback(
+		async (storyId: string, chapterId: number) => {
+			if (!isAuthenticated) {
+				return; // Don't save history if user is not authenticated
+			}
+
+			try {
+				await api.post(endpoints.saveHistory(), {
+					storyId: Number(storyId),
+					chapterId: chapterId,
+				});
+				console.log('[ChapterReader] Saved reading history:', { storyId, chapterId });
+			} catch (err) {
+				console.error('[ChapterReader] Error saving reading history:', err);
+				// Don't show error to user, just log it
+			}
+		},
+		[isAuthenticated]
+	);
 
 	// Load all chapters to get navigation info
 	useEffect(() => {
@@ -103,6 +126,11 @@ export default function ChapterReaderPage() {
 				};
 
 				setChapter(mappedChapter);
+
+				// Save reading history after chapter is loaded
+				if (storyId && chapterData.id) {
+					saveReadingHistory(storyId, chapterData.id);
+				}
 			} catch (err: any) {
 				console.error('Error loading chapter:', err);
 				const errorMessage = err.response?.data?.message || err.message || 'Không thể tải chương. Vui lòng thử lại sau.';
@@ -123,18 +151,26 @@ export default function ChapterReaderPage() {
 			// chapterId is already a database ID, can load directly
 			loadChapter();
 		}
-	}, [storyId, chapterId, allChapters, chaptersLoaded]);
+	}, [storyId, chapterId, allChapters, chaptersLoaded, saveReadingHistory]);
 
 	// Build image URLs from imageIds
 	const imageUrls = useMemo(() => {
 		if (!chapter?.imageIds || chapter.imageIds.length === 0) return [];
 
 		const gatewayUrl = import.meta.env.VITE_API_GATEWAY_URL || 'http://localhost:8081';
-		return chapter.imageIds.map((imagePath) => {
+		return chapter.imageIds.map((imagePath, idx) => {
 			// imagePath is already like "/public/images/..."
-			return imagePath.startsWith('/') ? `${gatewayUrl}${imagePath}` : `${gatewayUrl}/${imagePath}`;
+			const fullUrl = imagePath.startsWith('/') ? `${gatewayUrl}${imagePath}` : `${gatewayUrl}/${imagePath}`;
+			console.log('[ChapterReader] Image URL', idx, fullUrl);
+			return fullUrl;
 		});
 	}, [chapter?.imageIds]);
+
+	useEffect(() => {
+		if (chapter) {
+			console.log('[ChapterReader] Loaded chapter', chapter.chapterNumber, chapter.imageIds);
+		}
+	}, [chapter]);
 
 	// Close chapter list when clicking outside
 	useEffect(() => {
@@ -316,18 +352,21 @@ export default function ChapterReaderPage() {
 			</div>
 
 			{/* Chapter Content */}
-			<div className="mx-auto max-w-3xl space-y-4">
+			<div className="mx-auto max-w-2xl space-y-4">
 				{imageUrls.length > 0 ? (
 					imageUrls.map((imageUrl, index) => (
-						<div key={index} className="overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-900">
+						<div key={index} className="mx-auto overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/60">
 							<img
 								src={imageUrl}
 								alt={`Trang ${index + 1}`}
-								className="w-full"
+								className="w-full rounded-lg object-contain"
 								loading={index < 3 ? 'eager' : 'lazy'}
 								onError={(e) => {
 									console.error(`Failed to load image: ${imageUrl}`);
-									(e.target as HTMLImageElement).src = 'https://via.placeholder.com/800x1200?text=Không+tải+được+ảnh';
+									const target = e.target as HTMLImageElement;
+									target.onerror = null;
+									target.src =
+										'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200"><rect width="100%" height="100%" fill="%23252525"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23ffffff" font-size="32">Không tải được ảnh</text></svg>';
 								}}
 							/>
 						</div>

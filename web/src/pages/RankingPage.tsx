@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Flame, Medal, Sparkles, Trophy, Zap } from 'lucide-react';
+import { api, endpoints } from '@/services/apiClient';
 
 type RankedStory = {
 	id: string;
@@ -12,120 +13,8 @@ type RankedStory = {
 	rank: number;
 	trend?: number;
 	updateNote?: string;
+	chapterCount?: number;
 };
-
-const baseStories: RankedStory[] = [
-	{
-		id: '1',
-		title: 'Đại Chúa Tể',
-		cover: 'https://picsum.photos/300/400?random=21',
-		genres: ['Huyền Huyễn', 'Hành Động'],
-		rating: 4.9,
-		views: 1_234_567,
-		rank: 1,
-		trend: 3,
-		updateNote: 'Cập nhật 2 giờ trước',
-	},
-	{
-		id: '2',
-		title: 'Thám Tử Lừng Danh Conan',
-		cover: 'https://picsum.photos/300/400?random=22',
-		genres: ['Trinh Thám'],
-		rating: 4.7,
-		views: 987_654,
-		rank: 2,
-		trend: 1,
-		updateNote: 'Cập nhật hôm qua',
-	},
-	{
-		id: '3',
-		title: 'One Piece',
-		cover: 'https://picsum.photos/300/400?random=23',
-		genres: ['Phiêu Lưu', 'Hành Động'],
-		rating: 4.9,
-		views: 2_345_678,
-		rank: 3,
-		trend: 5,
-		updateNote: 'Cập nhật 30 phút trước',
-	},
-	{
-		id: '4',
-		title: 'Naruto',
-		cover: 'https://picsum.photos/300/400?random=24',
-		genres: ['Hành Động'],
-		rating: 4.6,
-		views: 876_543,
-		rank: 4,
-		trend: -1,
-		updateNote: 'Cập nhật 3 ngày trước',
-	},
-	{
-		id: '5',
-		title: 'Attack on Titan',
-		cover: 'https://picsum.photos/300/400?random=25',
-		genres: ['Hành Động', 'Kịch Tính'],
-		rating: 4.92,
-		views: 765_432,
-		rank: 5,
-		trend: 2,
-		updateNote: 'Cập nhật 12 giờ trước',
-	},
-	{
-		id: '6',
-		title: 'Solo Leveling',
-		cover: 'https://picsum.photos/300/400?random=26',
-		genres: ['Hành Động'],
-		rating: 4.8,
-		views: 654_321,
-		rank: 6,
-		trend: 0,
-		updateNote: 'Cập nhật tuần trước',
-	},
-	{
-		id: '7',
-		title: 'Doraemon',
-		cover: 'https://picsum.photos/300/400?random=27',
-		genres: ['Hài Hước'],
-		rating: 4.5,
-		views: 543_210,
-		rank: 7,
-		trend: 1,
-		updateNote: 'Cập nhật 5 ngày trước',
-	},
-	{
-		id: '8',
-		title: 'Kimetsu no Yaiba',
-		cover: 'https://picsum.photos/300/400?random=28',
-		genres: ['Hành Động'],
-		rating: 4.75,
-		views: 432_109,
-		rank: 8,
-		trend: 4,
-		updateNote: 'Cập nhật 3 giờ trước',
-	},
-	{
-		id: '9',
-		title: 'Jujutsu Kaisen',
-		cover: 'https://picsum.photos/300/400?random=29',
-		genres: ['Siêu Nhiên'],
-		rating: 4.63,
-		views: 321_098,
-		rank: 9,
-		trend: -2,
-		updateNote: 'Cập nhật 1 ngày trước',
-	},
-	{
-		id: '10',
-		title: 'Spy x Family',
-		cover: 'https://picsum.photos/300/400?random=30',
-		genres: ['Gia Đình', 'Hài Hước'],
-		rating: 4.81,
-		views: 210_987,
-		rank: 10,
-		trend: 2,
-		updateNote: 'Cập nhật 2 ngày trước',
-	},
-];
 
 const filters = [
 	{ key: 'weekly', label: 'Tuần này', icon: Flame },
@@ -135,38 +24,109 @@ const filters = [
 
 export default function RankingPage() {
 	const [activeFilter, setActiveFilter] = useState<string>('weekly');
+	const [stories, setStories] = useState<RankedStory[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
 
-	const { topThree, remaining } = useMemo(() => {
-		const sorted = [...baseStories].sort((a, b) => a.rank - b.rank);
-		return {
-			topThree: sorted.slice(0, 3),
-			remaining: sorted.slice(3),
+	useEffect(() => {
+		const loadRanking = async () => {
+			try {
+				setLoading(true);
+				setError(null);
+				const response = await api.get<{ id: number; title: string; genres?: string[]; coverImageId?: string; description?: string; }[]>(
+					endpoints.stories()
+				);
+
+				const gateway = (import.meta as any).env?.VITE_API_GATEWAY_URL || 'http://localhost:8081';
+				const topStories = response.data.slice(0, 12);
+
+				const enriched = await Promise.all(
+					topStories.map(async (story, index) => {
+						let chapterCount = 0;
+						try {
+							const chaptersRes = await api.get<{ id: number }[]>(endpoints.chapters(String(story.id)));
+							chapterCount = chaptersRes.data.length;
+						} catch (chapterError) {
+							console.warn('Không thể tải chương cho truyện', story.id, chapterError);
+						}
+
+						const derivedRating = Math.min(5, 3 + chapterCount / 10);
+						const derivedViews = chapterCount * 1500 + (index + 1) * 250;
+
+						return {
+							id: story.id.toString(),
+							title: story.title,
+							cover: story.coverImageId ? `${gateway}${story.coverImageId}` : undefined,
+							genres: story.genres,
+							rating: Number(derivedRating.toFixed(2)),
+							views: derivedViews,
+							rank: index + 1,
+							trend: chapterCount ? Math.max(-5, Math.min(5, chapterCount - 5)) : 0,
+							updateNote: chapterCount ? `${chapterCount} chương` : undefined,
+							chapterCount,
+						};
+					})
+				);
+
+				const sorted = enriched.sort((a, b) => b.views - a.views).map((story, idx) => ({ ...story, rank: idx + 1 }));
+				setStories(sorted);
+			} catch (err: any) {
+				console.error('Không thể tải bảng xếp hạng:', err);
+				setError('Không thể tải dữ liệu bảng xếp hạng. Vui lòng thử lại sau.');
+			} finally {
+				setLoading(false);
+			}
 		};
+
+		loadRanking();
 	}, []);
 
-	const stats = useMemo(
-		() => [
+	const filteredStories = useMemo(() => {
+		if (activeFilter === 'monthly') {
+			return [...stories].sort((a, b) => (b.chapterCount || 0) - (a.chapterCount || 0));
+		}
+		if (activeFilter === 'weekly') {
+			return [...stories].sort((a, b) => (b.trend || 0) - (a.trend || 0));
+		}
+		return stories;
+	}, [stories, activeFilter]);
+
+	const topThree = filteredStories.slice(0, 3);
+	const remaining = filteredStories.slice(3);
+
+	const stats = useMemo(() => {
+		if (!stories.length) {
+			return [
+				{ title: 'Bảng xếp hạng cập nhật', value: '—', icon: Trophy, description: 'Đang thu thập dữ liệu...' },
+				{ title: 'Xu hướng bùng nổ', value: '—', icon: Flame, description: 'Đang cập nhật xu hướng.' },
+				{ title: 'Điểm đánh giá trung bình', value: '—', icon: Sparkles, description: 'Sẽ hiển thị sau khi có dữ liệu.' },
+			];
+		}
+
+		const avgRating = stories.reduce((sum, story) => sum + story.rating, 0) / stories.length;
+		const avgChapters = stories.reduce((sum, story) => sum + (story.chapterCount || 0), 0) / stories.length;
+
+		return [
 			{
 				title: 'Bảng xếp hạng cập nhật',
-				value: '10 truyện',
+				value: `${stories.length} truyện`,
 				icon: Trophy,
-				description: 'Dựa trên lượt xem và đánh giá thực tế trong 24h qua.',
+				description: 'Dựa trên dữ liệu truyện thực tế từ hệ thống.',
 			},
 			{
-				title: 'Xu hướng bùng nổ',
-				value: '+38%',
+				title: 'Chương trung bình',
+				value: `${Math.round(avgChapters)} chương`,
 				icon: Flame,
-				description: 'Tăng trưởng lượt xem trung bình của top 3 so với tuần trước.',
+				description: 'Trung bình số chương của các truyện trong bảng xếp hạng.',
 			},
 			{
 				title: 'Điểm đánh giá trung bình',
-				value: '4.78/5',
+				value: `${avgRating.toFixed(2)}/5`,
 				icon: Sparkles,
-				description: 'Được cộng đồng bình chọn và cập nhật mỗi ngày.',
+				description: 'Được chuẩn hóa dựa trên số chương hiện có.',
 			},
-		],
-		[]
-	);
+		];
+	}, [stories]);
 
 	const rankBadgeClass = (rank: number) => {
 		if (rank === 1) return 'bg-gradient-to-br from-yellow-400 via-amber-400 to-orange-400 text-white';
@@ -234,7 +194,10 @@ export default function RankingPage() {
 			</section>
 
 			<section className="grid gap-4 md:grid-cols-3">
-				{topThree.map((story) => (
+				{(loading ? Array.from({ length: 3 }) : topThree).map((story, idx) =>
+					loading ? (
+						<div key={idx} className="h-96 animate-pulse rounded-3xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950" />
+					) : story ? (
 					<Link
 						key={story.id}
 						to={`/story/${story.id}`}
@@ -282,51 +245,66 @@ export default function RankingPage() {
 							)}
 						</div>
 					</Link>
-				))}
+					) : null
+				)}
 			</section>
 
 			<section className="space-y-4">
 				<h2 className="text-xl font-semibold text-zinc-900 dark:text-white">Danh sách nổi bật</h2>
 				<div className="grid gap-4 lg:grid-cols-2">
-					{remaining.map((story) => (
-						<Link
-							key={story.id}
-							to={`/story/${story.id}`}
-							className="group flex gap-4 rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:border-brand/40 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-950"
-						>
-							<div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${rankBadgeClass(story.rank)}`}>
-								#{story.rank}
-							</div>
-							<div className="relative h-20 w-16 shrink-0 overflow-hidden rounded-2xl bg-zinc-200 shadow-inner">
-								<img src={story.cover} alt={story.title} className="h-full w-full object-cover" loading="lazy" />
-								{story.trend !== undefined && (
-									<div className="absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-zinc-900/80 px-2 py-0.5 text-[10px] text-white backdrop-blur">
-										<Zap size={12} />
-										{story.trend > 0 ? `+${story.trend}` : story.trend}
+					{loading
+						? Array.from({ length: 4 }).map((_, idx) => (
+								<div key={idx} className="h-28 animate-pulse rounded-3xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950" />
+						  ))
+						: remaining.map((story) => (
+								<Link
+									key={story.id}
+									to={`/story/${story.id}`}
+									className="group flex gap-4 rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:border-brand/40 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-950"
+								>
+									<div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${rankBadgeClass(story.rank)}`}>
+										#{story.rank}
 									</div>
-								)}
-							</div>
-							<div className="flex min-w-0 flex-1 flex-col gap-2">
-								<div className="flex items-start justify-between">
-									<h3 className="truncate text-sm font-semibold text-zinc-900 transition group-hover:text-brand dark:text-white">
-										{story.title}
-									</h3>
-									<span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-600">
-										★ {story.rating.toFixed(1)}
-									</span>
-								</div>
-								{story.genres && (
-									<p className="truncate text-xs text-zinc-500">{story.genres.join(' • ')}</p>
-								)}
-								<div className="flex items-center gap-4 text-xs text-zinc-500 dark:text-zinc-400">
-									<span>{story.views.toLocaleString('vi-VN')} lượt xem</span>
-									{story.updateNote && <span>{story.updateNote}</span>}
-								</div>
-							</div>
-						</Link>
-					))}
+									<div className="relative h-20 w-16 shrink-0 overflow-hidden rounded-2xl bg-zinc-200 shadow-inner">
+										{story.cover ? (
+											<img src={story.cover} alt={story.title} className="h-full w-full object-cover" loading="lazy" />
+										) : (
+											<div className="grid h-full w-full place-items-center text-[10px] text-zinc-500">No Cover</div>
+										)}
+										{story.trend !== undefined && (
+											<div className="absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-zinc-900/80 px-2 py-0.5 text-[10px] text-white backdrop-blur">
+												<Zap size={12} />
+												{story.trend > 0 ? `+${story.trend}` : story.trend}
+											</div>
+										)}
+									</div>
+									<div className="flex min-w-0 flex-1 flex-col gap-2">
+										<div className="flex items-start justify-between">
+											<h3 className="truncate text-sm font-semibold text-zinc-900 transition group-hover:text-brand dark:text-white">
+												{story.title}
+											</h3>
+											<span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-600">
+												★ {story.rating.toFixed(1)}
+											</span>
+										</div>
+										{story.genres && (
+											<p className="truncate text-xs text-zinc-500">{story.genres.join(' • ')}</p>
+										)}
+										<div className="flex items-center gap-4 text-xs text-zinc-500 dark:text-zinc-400">
+											<span>{story.views.toLocaleString('vi-VN')} lượt xem tính theo chương</span>
+											{story.updateNote && <span>{story.updateNote}</span>}
+										</div>
+									</div>
+								</Link>
+						  ))}
 				</div>
 			</section>
+
+			{error && (
+				<div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+					{error}
+				</div>
+			)}
 		</div>
 	);
 }
