@@ -1,17 +1,35 @@
 import { LogIn } from 'lucide-react';
 import { useAuth } from '@/providers/AuthProvider';
+import { useToast } from '@/hooks/useToast';
 
 export function LoginModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-    const { login } = useAuth();
+    const { login, isOAuthConfigured } = useAuth();
+    const toast = useToast();
 
     if (!open) return null;
 
     const handleOAuth = async () => {
-        await login(window.location.pathname + window.location.search, 'oauth2');
+        try {
+            await login(window.location.pathname + window.location.search, 'oauth2');
+        } catch (error: any) {
+            console.error('OAuth login error:', error);
+            toast.error(
+                error.message || 
+                'Không thể kết nối đến OAuth server. Vui lòng kiểm tra cấu hình hoặc sử dụng đăng nhập bằng email.'
+            );
+        }
     };
 
     const handleFacebook = async () => {
-        await login(window.location.pathname + window.location.search, 'facebook');
+        try {
+            await login(window.location.pathname + window.location.search, 'facebook');
+        } catch (error: any) {
+            console.error('Facebook login error:', error);
+            toast.error(
+                error.message || 
+                'Không thể kết nối đến OAuth server. Vui lòng kiểm tra cấu hình hoặc sử dụng đăng nhập bằng email.'
+            );
+        }
     };
 
     return (
@@ -23,18 +41,26 @@ export function LoginModal({ open, onClose }: { open: boolean; onClose: () => vo
                     <h2 className="text-lg font-semibold">Đăng nhập</h2>
                 </div>
                 <div className="space-y-3">
-                    <button
-                        className="w-full rounded-md border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
-                        onClick={handleOAuth}
-                    >
-                        Đăng nhập bằng OAuth2
-                    </button>
-                    <button
-                        className="w-full rounded-md bg-[#1877F2] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
-                        onClick={handleFacebook}
-                    >
-                        Đăng nhập bằng Facebook
-                    </button>
+                    {isOAuthConfigured ? (
+                        <>
+                            <button
+                                className="w-full rounded-md border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
+                                onClick={handleOAuth}
+                            >
+                                Đăng nhập bằng OAuth2
+                            </button>
+                            <button
+                                className="w-full rounded-md bg-[#1877F2] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+                                onClick={handleFacebook}
+                            >
+                                Đăng nhập bằng Facebook
+                            </button>
+                        </>
+                    ) : (
+                        <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200">
+                            OAuth chưa được cấu hình. Vui lòng sử dụng đăng nhập bằng email.
+                        </div>
+                    )}
                 </div>
                 <button
                     className="absolute right-3 top-3 rounded-md px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"

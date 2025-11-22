@@ -70,13 +70,17 @@ export const endpoints = {
 
 	// Story Service
 	stories: () => '/api/story',
+	createStory: () => '/api/story',
 	storyDetail: (id: string) => `/api/story/${id}`,
 	updateStory: (id: string | number) => `/api/story/${id}`,
 	deleteStory: (id: string | number) => `/api/story/${id}`,
+	uploadCover: (storyId: string | number) => `/api/story/${storyId}/cover`,
 	chapters: (storyId: string) => `/api/story/${storyId}/chapters`,
+	createChapter: (storyId: string | number) => `/api/story/${storyId}/chapters`,
 	chapterById: (chapterId: string) => `/api/story/chapters/${chapterId}`,
 	chapterContent: (storyId: string, chapterId: string) => `/api/story/${storyId}/chapters/${chapterId}`,
 	deleteChapter: (storyId: string | number, chapterId: string | number) => `/api/story/${storyId}/chapters/${chapterId}`,
+	uploadChapterImages: (storyId: string | number, chapterNumber: number) => `/api/story/${storyId}/chapters/${chapterNumber}/images`,
 	deleteChapterImages: (storyId: string | number, chapterNumber: number, index?: number, filename?: string) => {
 		const baseUrl = `/api/story/${storyId}/chapters/${chapterNumber}/images`;
 		const params = new URLSearchParams();

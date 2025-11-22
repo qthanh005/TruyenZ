@@ -20,18 +20,22 @@ type EmailUser = {
 type AuthUser = User | EmailUser | null;
 
 type AuthContextValue = {
-	manager: UserManager;
+	manager: UserManager | null;
 	user: AuthUser;
 	isAuthenticated: boolean;
 	isLoading: boolean;
     login: (redirectTo?: string, provider?: 'oauth2' | 'facebook') => Promise<void>;
 	logout: () => Promise<void>;
 	refreshEmailUser: () => Promise<void>;
+	isOAuthConfigured: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function createManager() {
+function createManager(): UserManager | null {
+	if (!oauthConfig.isConfigured) {
+		return null;
+	}
 	return new UserManager({
 		authority: oauthConfig.issuer,
 		client_id: oauthConfig.clientId,
@@ -49,6 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [manager] = useState(createManager);
 	const [user, setUser] = useState<AuthUser>(null);
 	const [isLoading, setIsLoading] = useState(true);
+	const isOAuthConfigured = oauthConfig.isConfigured;
 
 	// Load user from localStorage (email/password) or OAuth
 	useEffect(() => {
@@ -72,39 +77,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				}
 			}
 
-			// Try to load OAuth user
-			try {
-				const oauthUser = await manager.getUser();
-				if (oauthUser && !oauthUser.expired) {
-					setUser(oauthUser);
-					attachToken(oauthUser);
-				} else {
+			// Try to load OAuth user (only if OAuth is configured)
+			if (manager) {
+				try {
+					const oauthUser = await manager.getUser();
+					if (oauthUser && !oauthUser.expired) {
+						setUser(oauthUser);
+						attachToken(oauthUser);
+					} else {
+						setUser(null);
+					}
+				} catch (e) {
 					setUser(null);
 				}
-			} catch (e) {
-				setUser(null);
 			}
 			setIsLoading(false);
 		};
 
 		loadUser();
 
-		const onUserLoaded = (u: User) => {
-			// Clear email/password auth when OAuth user loads
-			localStorage.removeItem('auth_token');
-			localStorage.removeItem('user');
-			setUser(u);
-			attachToken(u);
-		};
-		const onUserUnloaded = () => {
-			setUser(null);
-		};
-		manager.events.addUserLoaded(onUserLoaded);
-		manager.events.addUserUnloaded(onUserUnloaded);
-		return () => {
-			manager.events.removeUserLoaded(onUserLoaded);
-			manager.events.removeUserUnloaded(onUserUnloaded);
-		};
+		if (manager) {
+			const onUserLoaded = (u: User) => {
+				// Clear email/password auth when OAuth user loads
+				localStorage.removeItem('auth_token');
+				localStorage.removeItem('user');
+				setUser(u);
+				attachToken(u);
+			};
+			const onUserUnloaded = () => {
+				setUser(null);
+			};
+			manager.events.addUserLoaded(onUserLoaded);
+			manager.events.addUserUnloaded(onUserUnloaded);
+			return () => {
+				manager.events.removeUserLoaded(onUserLoaded);
+				manager.events.removeUserUnloaded(onUserUnloaded);
+			};
+		}
 	}, [manager]);
 
 	const refreshEmailUser = async () => {
@@ -152,17 +161,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			((user instanceof User && !user.expired) || !(user instanceof User))
 		),
 		isLoading,
+		isOAuthConfigured,
         login: async (redirectTo?: string, provider?: 'oauth2' | 'facebook') => {
-            await manager.clearStaleState();
-            if (provider === 'facebook') {
-                await manager.signinRedirect({
-                    state: { redirectTo },
-                    // If using Keycloak or a brokered IdP, this hint selects Facebook IdP
-                    extraQueryParams: { kc_idp_hint: 'facebook' },
-                });
-            } else {
-                await manager.signinRedirect({ state: { redirectTo } });
-            }
+			if (!manager || !isOAuthConfigured) {
+				throw new Error(
+					'OAuth is not configured. Please set VITE_OAUTH_ISSUER environment variable to a valid OAuth provider URL.'
+				);
+			}
+            try {
+				await manager.clearStaleState();
+				if (provider === 'facebook') {
+					await manager.signinRedirect({
+						state: { redirectTo },
+						// If using Keycloak or a brokered IdP, this hint selects Facebook IdP
+						extraQueryParams: { kc_idp_hint: 'facebook' },
+					});
+				} else {
+					await manager.signinRedirect({ state: { redirectTo } });
+				}
+			} catch (error: any) {
+				console.error('OAuth login error:', error);
+				// Re-throw with a more user-friendly message
+				if (error.message?.includes('Failed to fetch') || error.message?.includes('ERR_NAME_NOT_RESOLVED')) {
+					throw new Error(
+						'Cannot connect to OAuth server. Please check your VITE_OAUTH_ISSUER configuration.'
+					);
+				}
+				throw error;
+			}
         },
 		logout: async () => {
 			// Clear email/password auth
@@ -171,15 +197,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			delete api.defaults.headers.common['Authorization'];
 			
 			// If OAuth user, use OAuth logout
-			if (user instanceof User) {
-				await manager.signoutRedirect();
+			if (user instanceof User && manager) {
+				try {
+					await manager.signoutRedirect();
+				} catch (error) {
+					console.error('OAuth logout error:', error);
+					// Fallback to just clearing state
+					setUser(null);
+				}
 			} else {
 				// For email/password, just clear state
 				setUser(null);
 			}
 		},
 		refreshEmailUser,
-	}), [manager, user, isLoading, refreshEmailUser]);
+	}), [manager, user, isLoading, refreshEmailUser, isOAuthConfigured]);
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

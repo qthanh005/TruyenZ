@@ -12,6 +12,7 @@ type BookmarkItem = {
 	id: number;
 	storyId: number;
 	chapterId: number;
+	chapterNumber?: number;
 	storyTitle?: string;
 	chapterTitle?: string;
 	cover?: string;
@@ -203,6 +204,7 @@ export default function ProfilePage() {
 								id: bookmark.id,
 								storyId: bookmark.storyId,
 								chapterId: bookmark.chapterId,
+								chapterNumber: chapter.chapterNumber,
 								storyTitle: story.title,
 								chapterTitle: chapter.title || `Chương ${chapter.chapterNumber}`,
 								cover: coverUrl,
@@ -214,6 +216,7 @@ export default function ProfilePage() {
 								id: bookmark.id,
 								storyId: bookmark.storyId,
 								chapterId: bookmark.chapterId,
+								chapterNumber: undefined,
 								storyTitle: `Truyện ${bookmark.storyId}`,
 								chapterTitle: `Chương ${bookmark.chapterId}`,
 								createdAt: formatTimeAgo(bookmark.createdAt),
@@ -644,7 +647,7 @@ export default function ProfilePage() {
 							bookmarks.map((item) => (
 								<Link
 									key={item.id}
-									to={`/story/${item.storyId}/chapter/${item.chapterId}`}
+									to={`/story/${item.storyId}/chapter/${item.chapterNumber ?? item.chapterId}`}
 									className="flex items-center gap-4 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-4 transition hover:border-brand/50 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:border-brand/60"
 								>
 									<div className="h-20 w-16 overflow-hidden rounded-xl bg-zinc-200 shadow-inner">

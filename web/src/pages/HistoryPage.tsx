@@ -12,6 +12,7 @@ type HistoryItem = {
 	storyTitle: string;
 	cover?: string;
 	chapterId: string;
+	chapterNumber?: number;
 	chapterTitle: string;
 	lastRead: string;
 	progress?: number;
@@ -139,6 +140,7 @@ export default function HistoryPage() {
 								storyTitle: story.title,
 								cover: coverUrl,
 								chapterId: String(history.chapterId),
+								chapterNumber: chapter.chapterNumber,
 								chapterTitle: chapter.title || `Chương ${chapter.chapterNumber}`,
 								lastRead: formatTime(history.lastReadAt),
 								progress: progress,
@@ -153,6 +155,7 @@ export default function HistoryPage() {
 								storyId: String(history.storyId),
 								storyTitle: `Truyện ${history.storyId}`,
 								chapterId: String(history.chapterId),
+								chapterNumber: undefined,
 								chapterTitle: `Chương ${history.chapterId}`,
 								lastRead: formatTime(history.lastReadAt),
 								updatedAt: formatTimeAgo(history.lastReadAt),
@@ -376,7 +379,7 @@ export default function HistoryPage() {
 						return (
 							<Link
 								key={itemKey}
-								to={`/story/${item.storyId}/chapter/${item.chapterId}`}
+								to={`/story/${item.storyId}/chapter/${item.chapterNumber ?? item.chapterId}`}
 								className="group relative flex gap-4 overflow-hidden rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-brand/40 hover:shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
 							>
 								<div className="absolute inset-y-0 left-0 w-1 rounded-full bg-brand/60 opacity-0 transition group-hover:opacity-100" />

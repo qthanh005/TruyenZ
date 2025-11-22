@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { api, endpoints } from '@/services/apiClient';
 import { useAuth } from '@/providers/AuthProvider';
 import { useToast } from '@/hooks/useToast';
@@ -21,6 +21,8 @@ import {
 	Wand2,
 	CheckCircle2,
 	PencilLine,
+	Upload,
+	Image as ImageIcon,
 } from 'lucide-react';
 
 type StoryResponse = {
@@ -79,6 +81,45 @@ export default function AdminComics() {
 	} | null>(null);
 	const [availableGenres, setAvailableGenres] = useState<string[]>([]);
 	const [saving, setSaving] = useState(false);
+	const [showCreateModal, setShowCreateModal] = useState(false);
+	const [createFormData, setCreateFormData] = useState<{
+		title: string;
+		description: string;
+		genres: string[];
+		author: string;
+		price: number;
+		paid: boolean;
+		coverImageId: string;
+	}>({
+		title: '',
+		description: '',
+		genres: [],
+		author: '',
+		price: 0,
+		paid: false,
+		coverImageId: '',
+	});
+	const [coverFile, setCoverFile] = useState<File | null>(null);
+	const [coverPreview, setCoverPreview] = useState<string | null>(null);
+	const [creating, setCreating] = useState(false);
+	const coverFileInputRef = useRef<HTMLInputElement>(null);
+	const [showCreateChapterModal, setShowCreateChapterModal] = useState(false);
+	const [creatingChapterStoryId, setCreatingChapterStoryId] = useState<number | null>(null);
+	const [createChapterData, setCreateChapterData] = useState<{
+		chapterNumber: number;
+		title: string;
+	}>({
+		chapterNumber: 1,
+		title: '',
+	});
+	const [chapterImages, setChapterImages] = useState<File[]>([]);
+	const [chapterImagePreviews, setChapterImagePreviews] = useState<string[]>([]);
+	const [creatingChapter, setCreatingChapter] = useState(false);
+	const chapterImagesInputRef = useRef<HTMLInputElement>(null);
+	const [editingChapterImages, setEditingChapterImages] = useState<File[]>([]);
+	const [editingChapterImagePreviews, setEditingChapterImagePreviews] = useState<string[]>([]);
+	const [uploadingChapterImages, setUploadingChapterImages] = useState(false);
+	const editingChapterImagesInputRef = useRef<HTMLInputElement>(null);
 	const pageSize = 10;
 
 	// Get user ID from user object
@@ -214,6 +255,457 @@ export default function AdminComics() {
 		} catch (error) {
 			console.error('Error deleting chapter:', error);
 			toast.error('Không thể xóa chương. Vui lòng thử lại.');
+		}
+	};
+
+	const handleCoverFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
+		if (!file) return;
+
+		// Validate file type
+		if (!file.type.startsWith('image/')) {
+			toast.error('Chỉ chấp nhận file ảnh');
+			return;
+		}
+
+		// Validate file size (max 10MB)
+		if (file.size > 10 * 1024 * 1024) {
+			toast.error('File không được vượt quá 10MB');
+			return;
+		}
+
+		setCoverFile(file);
+
+		// Create preview
+		const reader = new FileReader();
+		reader.onloadend = () => {
+			setCoverPreview(reader.result as string);
+		};
+		reader.readAsDataURL(file);
+	};
+
+	const handleChapterImagesSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const files = Array.from(e.target.files || []);
+		if (files.length === 0) return;
+
+		// Validate all files
+		const validFiles: File[] = [];
+		for (const file of files) {
+			if (!file.type.startsWith('image/')) {
+				toast.error(`File ${file.name} không phải là ảnh`);
+				continue;
+			}
+			if (file.size > 10 * 1024 * 1024) {
+				toast.error(`File ${file.name} vượt quá 10MB`);
+				continue;
+			}
+			validFiles.push(file);
+		}
+
+		if (validFiles.length === 0) return;
+
+		setChapterImages((prev) => [...prev, ...validFiles]);
+
+		// Create previews
+		validFiles.forEach((file) => {
+			const reader = new FileReader();
+			reader.onloadend = () => {
+				setChapterImagePreviews((prev) => [...prev, reader.result as string]);
+			};
+			reader.readAsDataURL(file);
+		});
+	};
+
+	const handleChapterImagesDrop = (e: React.DragEvent<HTMLDivElement>) => {
+		e.preventDefault();
+		const files = Array.from(e.dataTransfer.files || []);
+		if (files.length === 0) return;
+
+		// Validate all files
+		const validFiles: File[] = [];
+		for (const file of files) {
+			if (!file.type.startsWith('image/')) {
+				toast.error(`File ${file.name} không phải là ảnh`);
+				continue;
+			}
+			if (file.size > 10 * 1024 * 1024) {
+				toast.error(`File ${file.name} vượt quá 10MB`);
+				continue;
+			}
+			validFiles.push(file);
+		}
+
+		if (validFiles.length === 0) return;
+
+		setChapterImages((prev) => [...prev, ...validFiles]);
+
+		// Create previews
+		validFiles.forEach((file) => {
+			const reader = new FileReader();
+			reader.onloadend = () => {
+				setChapterImagePreviews((prev) => [...prev, reader.result as string]);
+			};
+			reader.readAsDataURL(file);
+		});
+	};
+
+	const handleRemoveChapterImage = (index: number) => {
+		setChapterImages((prev) => prev.filter((_, i) => i !== index));
+		setChapterImagePreviews((prev) => prev.filter((_, i) => i !== index));
+	};
+
+	const handleEditingChapterImagesSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const files = Array.from(e.target.files || []);
+		if (files.length === 0) return;
+
+		// Validate all files
+		const validFiles: File[] = [];
+		for (const file of files) {
+			if (!file.type.startsWith('image/')) {
+				toast.error(`File ${file.name} không phải là ảnh`);
+				continue;
+			}
+			if (file.size > 10 * 1024 * 1024) {
+				toast.error(`File ${file.name} vượt quá 10MB`);
+				continue;
+			}
+			validFiles.push(file);
+		}
+
+		if (validFiles.length === 0) return;
+
+		setEditingChapterImages((prev) => [...prev, ...validFiles]);
+
+		// Create previews
+		validFiles.forEach((file) => {
+			const reader = new FileReader();
+			reader.onloadend = () => {
+				setEditingChapterImagePreviews((prev) => [...prev, reader.result as string]);
+			};
+			reader.readAsDataURL(file);
+		});
+	};
+
+	const handleEditingChapterImagesDrop = (e: React.DragEvent<HTMLDivElement>) => {
+		e.preventDefault();
+		const files = Array.from(e.dataTransfer.files || []);
+		if (files.length === 0) return;
+
+		// Validate all files
+		const validFiles: File[] = [];
+		for (const file of files) {
+			if (!file.type.startsWith('image/')) {
+				toast.error(`File ${file.name} không phải là ảnh`);
+				continue;
+			}
+			if (file.size > 10 * 1024 * 1024) {
+				toast.error(`File ${file.name} vượt quá 10MB`);
+				continue;
+			}
+			validFiles.push(file);
+		}
+
+		if (validFiles.length === 0) return;
+
+		setEditingChapterImages((prev) => [...prev, ...validFiles]);
+
+		// Create previews
+		validFiles.forEach((file) => {
+			const reader = new FileReader();
+			reader.onloadend = () => {
+				setEditingChapterImagePreviews((prev) => [...prev, reader.result as string]);
+			};
+			reader.readAsDataURL(file);
+		});
+	};
+
+	const handleRemoveEditingChapterImage = (index: number) => {
+		setEditingChapterImages((prev) => prev.filter((_, i) => i !== index));
+		setEditingChapterImagePreviews((prev) => prev.filter((_, i) => i !== index));
+	};
+
+	const handleUploadEditingChapterImages = async () => {
+		if (!editingChapter || editingChapterImages.length === 0) return;
+
+		const userId = getUserId();
+		if (!userId) {
+			toast.error('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			return;
+		}
+
+		try {
+			setUploadingChapterImages(true);
+			const formData = new FormData();
+			editingChapterImages.forEach((file) => {
+				formData.append('files', file);
+			});
+
+			await api.post(
+				endpoints.uploadChapterImages(editingChapter.comicId, editingChapter.chapterNumber),
+				formData,
+				{
+					headers: {
+						'Content-Type': 'multipart/form-data',
+					},
+				}
+			);
+
+			// Reload chapter data
+			const response = await api.get<ChapterResponse>(endpoints.chapterById(String(editingChapter.chapterId)));
+			setEditingChapterData({
+				...response.data,
+				imageIds: response.data.imageIds || [],
+			});
+
+			// Clear upload state
+			setEditingChapterImages([]);
+			setEditingChapterImagePreviews([]);
+			if (editingChapterImagesInputRef.current) {
+				editingChapterImagesInputRef.current.value = '';
+			}
+
+			// Reload chapters for the comic
+			const comic = comics.find((c) => c.id === editingChapter.comicId);
+			if (comic) {
+				setComics((prev) =>
+					prev.map((c) =>
+						c.id === editingChapter.comicId ? { ...c, chapters: undefined } : c
+					)
+				);
+				loadChaptersForComic(editingChapter.comicId);
+			}
+
+			toast.success('Upload ảnh thành công!');
+		} catch (error: any) {
+			console.error('Error uploading chapter images:', error);
+			const errorMessage = error.response?.data?.message || error.message || 'Không thể upload ảnh. Vui lòng thử lại.';
+			toast.error(errorMessage);
+		} finally {
+			setUploadingChapterImages(false);
+		}
+	};
+
+	const handleCreateChapter = async () => {
+		if (!creatingChapterStoryId) return;
+
+		const userId = getUserId();
+		if (!userId) {
+			toast.error('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			return;
+		}
+
+		if (!createChapterData.chapterNumber || createChapterData.chapterNumber < 1) {
+			toast.error('Số chương phải lớn hơn 0');
+			return;
+		}
+
+		try {
+			setCreatingChapter(true);
+
+			// Create chapter first
+			const createRequest = {
+				chapterNumber: createChapterData.chapterNumber,
+				title: createChapterData.title.trim() || undefined,
+				imageIds: [], // Will be set after upload
+			};
+
+			const response = await api.post<ChapterResponse>(
+				endpoints.createChapter(creatingChapterStoryId),
+				createRequest,
+				{
+					headers: {
+						'X-User-Id': userId.toString(),
+					},
+				}
+			);
+
+			const newChapterNumber = response.data.chapterNumber;
+
+			// Upload images if any
+			if (chapterImages.length > 0 && newChapterNumber) {
+				try {
+					const formData = new FormData();
+					chapterImages.forEach((file) => {
+						formData.append('files', file);
+					});
+
+					await api.post(endpoints.uploadChapterImages(creatingChapterStoryId, newChapterNumber), formData, {
+						headers: {
+							'Content-Type': 'multipart/form-data',
+						},
+					});
+				} catch (uploadError: any) {
+					console.error('Error uploading chapter images:', uploadError);
+					toast.warning('Chương đã được tạo nhưng không thể upload ảnh. Bạn có thể upload sau.');
+				}
+			}
+
+			// Reload chapters for the story
+			const comic = comics.find((c) => c.id === creatingChapterStoryId);
+			if (comic) {
+				setComics((prev) =>
+					prev.map((c) =>
+						c.id === creatingChapterStoryId ? { ...c, chapters: undefined } : c
+					)
+				);
+				loadChaptersForComic(creatingChapterStoryId);
+			}
+
+			// Reset form and close modal
+			setCreateChapterData({
+				chapterNumber: 1,
+				title: '',
+			});
+			setChapterImages([]);
+			setChapterImagePreviews([]);
+			setCreatingChapterStoryId(null);
+			setShowCreateChapterModal(false);
+			if (chapterImagesInputRef.current) {
+				chapterImagesInputRef.current.value = '';
+			}
+			toast.success('Tạo chương thành công!');
+		} catch (error: any) {
+			console.error('Error creating chapter:', error);
+			const errorMessage = error.response?.data?.message || error.message || 'Không thể tạo chương. Vui lòng thử lại.';
+			toast.error(errorMessage);
+		} finally {
+			setCreatingChapter(false);
+		}
+	};
+
+	const handleCoverFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
+		e.preventDefault();
+		const file = e.dataTransfer.files?.[0];
+		if (!file) return;
+
+		// Validate file type
+		if (!file.type.startsWith('image/')) {
+			toast.error('Chỉ chấp nhận file ảnh');
+			return;
+		}
+
+		// Validate file size (max 10MB)
+		if (file.size > 10 * 1024 * 1024) {
+			toast.error('File không được vượt quá 10MB');
+			return;
+		}
+
+		setCoverFile(file);
+
+		// Create preview
+		const reader = new FileReader();
+		reader.onloadend = () => {
+			setCoverPreview(reader.result as string);
+		};
+		reader.readAsDataURL(file);
+	};
+
+	const handleCreateStory = async () => {
+		const userId = getUserId();
+		if (!userId) {
+			toast.error('Không thể xác định người dùng. Vui lòng đăng nhập lại.');
+			return;
+		}
+
+		if (!createFormData.title.trim()) {
+			toast.error('Vui lòng nhập tên truyện');
+			return;
+		}
+
+		try {
+			setCreating(true);
+			const createRequest = {
+				title: createFormData.title.trim(),
+				description: createFormData.description.trim() || undefined,
+				genres: createFormData.genres.length > 0 ? createFormData.genres : undefined,
+				coverImageId: undefined, // Will be set after upload
+				paid: createFormData.paid,
+				price: createFormData.paid ? createFormData.price : 0,
+				author: createFormData.author.trim() || undefined,
+			};
+
+			// Create story first
+			const response = await api.post<StoryResponse>(endpoints.createStory(), createRequest, {
+				headers: {
+					'X-User-Id': userId.toString(),
+				},
+			});
+
+			const newStoryId = response.data.id;
+
+			// Upload cover if file is selected
+			if (coverFile && newStoryId) {
+				try {
+					const formData = new FormData();
+					formData.append('file', coverFile);
+
+					const coverResponse = await api.post<string>(endpoints.uploadCover(newStoryId), formData, {
+						headers: {
+							'Content-Type': 'multipart/form-data',
+						},
+					});
+
+					// Update story with cover image ID
+					await api.put(
+						endpoints.updateStory(newStoryId),
+						{ coverImageId: coverResponse.data },
+						{
+							headers: {
+								'X-User-Id': userId.toString(),
+							},
+						}
+					);
+				} catch (uploadError: any) {
+					console.error('Error uploading cover:', uploadError);
+					toast.warning('Truyện đã được tạo nhưng không thể upload ảnh bìa. Bạn có thể upload sau.');
+				}
+			}
+
+			// Reload comics to reflect changes
+			const storiesResponse = await api.get<StoryResponse[]>(endpoints.stories());
+			const comicsData: Comic[] = storiesResponse.data.map((story) => {
+				const coverUrl = story.coverImageId
+					? `${(import.meta as any).env?.VITE_API_GATEWAY_URL || 'http://localhost:8081'}${story.coverImageId}`
+					: undefined;
+				
+				return {
+					id: story.id,
+					title: story.title,
+					slug: story.title.toLowerCase().replace(/\s+/g, '-'),
+					author: story.author || 'Chưa có',
+					status: 'Ongoing',
+					views: 0,
+					follows: 0,
+					cover_image: coverUrl,
+					chapters: comics.find((c) => c.id === story.id)?.chapters,
+					chaptersLoading: false,
+				};
+			});
+			setComics(comicsData);
+
+			// Reset form and close modal
+			setCreateFormData({
+				title: '',
+				description: '',
+				genres: [],
+				author: '',
+				price: 0,
+				paid: false,
+				coverImageId: '',
+			});
+			setCoverFile(null);
+			setCoverPreview(null);
+			if (coverFileInputRef.current) {
+				coverFileInputRef.current.value = '';
+			}
+			setShowCreateModal(false);
+			toast.success('Tạo truyện thành công!');
+		} catch (error: any) {
+			console.error('Error creating story:', error);
+			const errorMessage = error.response?.data?.message || error.message || 'Không thể tạo truyện. Vui lòng thử lại.';
+			toast.error(errorMessage);
+		} finally {
+			setCreating(false);
 		}
 	};
 
@@ -486,7 +978,15 @@ export default function AdminComics() {
 						{heroActions.map((action) => {
 							const Icon = action.icon;
 							return (
-								<button key={action.label} className="flex items-center justify-between rounded-xl border border-white/10 px-4 py-3 text-left text-white/80 transition hover:bg-white/10">
+								<button 
+									key={action.label} 
+									onClick={() => {
+										if (action.label === 'Tạo truyện thủ công') {
+											setShowCreateModal(true);
+										}
+									}}
+									className="flex items-center justify-between rounded-xl border border-white/10 px-4 py-3 text-left text-white/80 transition hover:bg-white/10"
+								>
 									<div>
 										<p className="text-sm font-semibold text-white">{action.label}</p>
 										<p className="text-xs text-white/70">{action.description}</p>
@@ -514,8 +1014,11 @@ export default function AdminComics() {
 						Bộ lọc
 					</button>
 				</div>
-				<button className="inline-flex items-center gap-2 rounded-2xl bg-brand px-4 py-2 text-sm font-medium text-white shadow-lg shadow-brand/30 transition hover:bg-brand/90">
-					<Sparkles className="h-4 w-4" />
+				<button 
+					onClick={() => setShowCreateModal(true)}
+					className="inline-flex items-center gap-2 rounded-2xl bg-brand px-4 py-2 text-sm font-medium text-white shadow-lg shadow-brand/30 transition hover:bg-brand/90"
+				>
+					<Plus className="h-4 w-4" />
 					Thêm truyện mới
 				</button>
 			</div>
@@ -590,7 +1093,21 @@ export default function AdminComics() {
 												{isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
 												{isExpanded ? 'Thu gọn chương' : `Xem chương (${chapterCount})`}
 											</button>
-											<button className="inline-flex items-center gap-1 rounded-xl border border-brand/40 px-3 py-1.5 text-xs font-medium text-brand transition hover:bg-brand/10">
+											<button 
+												onClick={() => {
+													setCreatingChapterStoryId(comic.id);
+													// Get next chapter number
+													const maxChapter = comic.chapters?.reduce((max, ch) => Math.max(max, ch.chapterNumber), 0) || 0;
+													setCreateChapterData({
+														chapterNumber: maxChapter + 1,
+														title: '',
+													});
+													setChapterImages([]);
+													setChapterImagePreviews([]);
+													setShowCreateChapterModal(true);
+												}}
+												className="inline-flex items-center gap-1 rounded-xl border border-brand/40 px-3 py-1.5 text-xs font-medium text-brand transition hover:bg-brand/10"
+											>
 												<Plus className="h-3.5 w-3.5" />
 												Thêm chương
 											</button>
@@ -605,7 +1122,21 @@ export default function AdminComics() {
 												<FileText className="h-4 w-4" />
 												Danh sách chương
 											</h4>
-											<button className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+											<button 
+												onClick={() => {
+													setCreatingChapterStoryId(comic.id);
+													// Get next chapter number
+													const maxChapter = comic.chapters?.reduce((max, ch) => Math.max(max, ch.chapterNumber), 0) || 0;
+													setCreateChapterData({
+														chapterNumber: maxChapter + 1,
+														title: '',
+													});
+													setChapterImages([]);
+													setChapterImagePreviews([]);
+													setShowCreateChapterModal(true);
+												}}
+												className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+											>
 												<Plus className="h-3.5 w-3.5" />
 												Thêm chương
 											</button>
@@ -643,7 +1174,19 @@ export default function AdminComics() {
 											<div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-6 text-center dark:border-zinc-700 dark:bg-zinc-900">
 												<FileText className="mx-auto mb-2 h-8 w-8 text-zinc-400" />
 												<p className="text-sm text-zinc-500">Chưa có chương nào. Bắt đầu với chương đầu tiên ngay bây giờ.</p>
-												<button className="mt-3 rounded-lg bg-brand px-4 py-2 text-xs font-medium text-white hover:bg-brand/90">
+												<button 
+													onClick={() => {
+														setCreatingChapterStoryId(comic.id);
+														setCreateChapterData({
+															chapterNumber: 1,
+															title: '',
+														});
+														setChapterImages([]);
+														setChapterImagePreviews([]);
+														setShowCreateChapterModal(true);
+													}}
+													className="mt-3 rounded-lg bg-brand px-4 py-2 text-xs font-medium text-white hover:bg-brand/90"
+												>
 													Thêm chương đầu tiên
 												</button>
 											</div>
@@ -818,6 +1361,240 @@ export default function AdminComics() {
 				</div>
 			)}
 
+			{/* Create Story Modal */}
+			{showCreateModal && (
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+					<div className="w-full max-w-2xl max-h-[90vh] rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-900 flex flex-col">
+						{/* Header */}
+						<div className="flex items-center justify-between border-b border-zinc-200 p-4 dark:border-zinc-800">
+							<h3 className="text-lg font-semibold text-zinc-900 dark:text-white">Tạo truyện mới</h3>
+							<button
+								onClick={() => {
+									setShowCreateModal(false);
+									setCreateFormData({
+										title: '',
+										description: '',
+										genres: [],
+										author: '',
+										price: 0,
+										paid: false,
+										coverImageId: '',
+									});
+									setCoverFile(null);
+									setCoverPreview(null);
+									if (coverFileInputRef.current) {
+										coverFileInputRef.current.value = '';
+									}
+								}}
+								className="rounded-lg p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+							>
+								<X className="h-5 w-5" />
+							</button>
+						</div>
+
+						{/* Form Content */}
+						<div className="flex-1 overflow-y-auto p-4 space-y-4">
+							{/* Title */}
+							<div>
+								<label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+									Tên truyện <span className="text-red-500">*</span>
+								</label>
+								<input
+									type="text"
+									value={createFormData.title}
+									onChange={(e) => setCreateFormData({ ...createFormData, title: e.target.value })}
+									placeholder="Nhập tên truyện"
+									className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+								/>
+							</div>
+
+							{/* Description */}
+							<div>
+								<label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+									Mô tả
+								</label>
+								<textarea
+									value={createFormData.description}
+									onChange={(e) => setCreateFormData({ ...createFormData, description: e.target.value })}
+									placeholder="Nhập mô tả truyện"
+									rows={4}
+									className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+								/>
+							</div>
+
+							{/* Author */}
+							<div>
+								<label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+									Tác giả
+								</label>
+								<input
+									type="text"
+									value={createFormData.author}
+									onChange={(e) => setCreateFormData({ ...createFormData, author: e.target.value })}
+									placeholder="Nhập tên tác giả"
+									className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+								/>
+							</div>
+
+							{/* Genres */}
+							<div>
+								<label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+									Thể loại
+								</label>
+								<div className="flex flex-wrap gap-2">
+									{availableGenres.map((genre) => (
+										<button
+											key={genre}
+											type="button"
+											onClick={() => {
+												const isSelected = createFormData.genres.includes(genre);
+												setCreateFormData({
+													...createFormData,
+													genres: isSelected
+														? createFormData.genres.filter((g) => g !== genre)
+														: [...createFormData.genres, genre],
+												});
+											}}
+											className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+												createFormData.genres.includes(genre)
+													? 'bg-brand text-white'
+													: 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
+											}`}
+										>
+											{genre}
+										</button>
+									))}
+								</div>
+							</div>
+
+							{/* Cover Image Upload */}
+							<div>
+								<label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+									Ảnh bìa
+								</label>
+								{coverPreview ? (
+									<div className="space-y-2">
+										<div className="relative w-full h-48 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800">
+											<img
+												src={coverPreview}
+												alt="Cover preview"
+												className="h-full w-full object-cover"
+											/>
+										</div>
+										<div className="flex items-center gap-2">
+											<button
+												type="button"
+												onClick={() => {
+													setCoverFile(null);
+													setCoverPreview(null);
+													if (coverFileInputRef.current) {
+														coverFileInputRef.current.value = '';
+													}
+												}}
+												className="flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+											>
+												Chọn ảnh khác
+											</button>
+										</div>
+									</div>
+								) : (
+									<div
+										onDrop={handleCoverFileDrop}
+										onDragOver={(e) => e.preventDefault()}
+										onDragEnter={(e) => e.preventDefault()}
+										className="relative"
+									>
+										<label
+											htmlFor="cover-upload"
+											className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-8 transition hover:border-brand hover:bg-brand/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-brand"
+										>
+											<Upload size={32} className="mb-2 text-zinc-400" />
+											<p className="mb-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+												{coverFile ? coverFile.name : 'Kéo thả ảnh vào đây hoặc click để chọn'}
+											</p>
+											<p className="text-xs text-zinc-500 dark:text-zinc-400">
+												PNG, JPG, GIF tối đa 10MB
+											</p>
+											<input
+												ref={coverFileInputRef}
+												id="cover-upload"
+												type="file"
+												accept="image/*"
+												onChange={handleCoverFileSelect}
+												className="hidden"
+												disabled={creating}
+											/>
+										</label>
+									</div>
+								)}
+							</div>
+
+							{/* Paid & Price */}
+							<div className="flex items-center gap-4">
+								<label className="flex items-center gap-2">
+									<input
+										type="checkbox"
+										checked={createFormData.paid}
+										onChange={(e) => setCreateFormData({ ...createFormData, paid: e.target.checked, price: e.target.checked ? createFormData.price : 0 })}
+										className="h-4 w-4 rounded border-zinc-300 text-brand focus:ring-brand"
+									/>
+									<span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Truyện trả phí</span>
+								</label>
+								{createFormData.paid && (
+									<div className="flex-1">
+										<label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+											Giá (VND)
+										</label>
+										<input
+											type="number"
+											value={createFormData.price}
+											onChange={(e) => setCreateFormData({ ...createFormData, price: parseInt(e.target.value) || 0 })}
+											min="0"
+											placeholder="0"
+											className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+										/>
+									</div>
+								)}
+							</div>
+						</div>
+
+						{/* Footer */}
+						<div className="flex items-center justify-end gap-3 border-t border-zinc-200 p-4 dark:border-zinc-800">
+							<button
+								onClick={() => {
+									setShowCreateModal(false);
+									setCreateFormData({
+										title: '',
+										description: '',
+										genres: [],
+										author: '',
+										price: 0,
+										paid: false,
+										coverImageId: '',
+									});
+									setCoverFile(null);
+									setCoverPreview(null);
+									if (coverFileInputRef.current) {
+										coverFileInputRef.current.value = '';
+									}
+								}}
+								className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+								disabled={creating}
+							>
+								Hủy
+							</button>
+							<button
+								onClick={handleCreateStory}
+								disabled={creating || !createFormData.title.trim()}
+								className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
+							>
+								{creating ? 'Đang tạo...' : 'Tạo truyện'}
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+
 			{/* Edit Chapter Modal */}
 			{editingChapter && editingChapterData && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -834,6 +1611,11 @@ export default function AdminComics() {
 								onClick={() => {
 									setEditingChapter(null);
 									setEditingChapterData(null);
+									setEditingChapterImages([]);
+									setEditingChapterImagePreviews([]);
+									if (editingChapterImagesInputRef.current) {
+										editingChapterImagesInputRef.current.value = '';
+									}
 								}}
 								className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
 							>
@@ -842,8 +1624,96 @@ export default function AdminComics() {
 						</div>
 
 						{/* Content - Image List */}
-						<div className="flex-1 overflow-y-auto p-6">
-							{loadingChapterData ? (
+						<div className="flex-1 overflow-y-auto p-6 space-y-6">
+							{/* Upload New Images Section */}
+							<div>
+								<label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+									Thêm ảnh mới {editingChapterImages.length > 0 && `(${editingChapterImages.length} ảnh đã chọn)`}
+								</label>
+								{editingChapterImagePreviews.length > 0 ? (
+									<div className="space-y-4">
+										<div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+											{editingChapterImagePreviews.map((preview, index) => (
+												<div key={index} className="group relative aspect-[3/4] overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-800">
+													<img
+														src={preview}
+														alt={`Preview ${index + 1}`}
+														className="h-full w-full object-cover"
+													/>
+													<div className="absolute top-2 left-2 rounded-full bg-black/70 px-2 py-0.5 text-xs font-medium text-white">
+														{index + 1}
+													</div>
+													<button
+														type="button"
+														onClick={() => handleRemoveEditingChapterImage(index)}
+														className="absolute top-2 right-2 rounded-full bg-red-500 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-600"
+													>
+														<X className="h-3 w-3" />
+													</button>
+													<div className="absolute bottom-0 left-0 right-0 truncate bg-black/70 px-2 py-1 text-[10px] text-white">
+														{editingChapterImages[index]?.name}
+													</div>
+												</div>
+											))}
+										</div>
+										<div className="flex gap-2">
+											<button
+												type="button"
+												onClick={() => {
+													if (editingChapterImagesInputRef.current) {
+														editingChapterImagesInputRef.current.click();
+													}
+												}}
+												className="flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+											>
+												Thêm ảnh khác
+											</button>
+											<button
+												type="button"
+												onClick={handleUploadEditingChapterImages}
+												disabled={uploadingChapterImages}
+												className="flex-1 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
+											>
+												{uploadingChapterImages ? 'Đang upload...' : 'Upload ảnh'}
+											</button>
+										</div>
+									</div>
+								) : (
+									<div
+										onDrop={handleEditingChapterImagesDrop}
+										onDragOver={(e) => e.preventDefault()}
+										onDragEnter={(e) => e.preventDefault()}
+										className="relative"
+									>
+										<label
+											htmlFor="editing-chapter-images-upload"
+											className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-6 transition hover:border-brand hover:bg-brand/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-brand"
+										>
+											<Upload size={24} className="mb-2 text-zinc-400" />
+											<p className="mb-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+												Kéo thả nhiều ảnh vào đây hoặc click để chọn
+											</p>
+											<p className="text-xs text-zinc-500 dark:text-zinc-400">
+												PNG, JPG, GIF tối đa 10MB mỗi ảnh. Có thể chọn nhiều ảnh cùng lúc.
+											</p>
+											<input
+												ref={editingChapterImagesInputRef}
+												id="editing-chapter-images-upload"
+												type="file"
+												accept="image/*"
+												multiple
+												onChange={handleEditingChapterImagesSelect}
+												className="hidden"
+												disabled={uploadingChapterImages}
+											/>
+										</label>
+									</div>
+								)}
+							</div>
+
+							{/* Existing Images Section */}
+							<div className="border-t border-zinc-200 pt-6 dark:border-zinc-800">
+								{loadingChapterData ? (
 								<div className="flex items-center justify-center py-12">
 									<div className="text-center">
 										<div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-brand border-r-transparent"></div>
@@ -903,6 +1773,7 @@ export default function AdminComics() {
 									<p className="text-sm text-zinc-500">Chương này chưa có ảnh nào</p>
 								</div>
 							)}
+							</div>
 						</div>
 
 						{/* Footer */}
@@ -915,6 +1786,173 @@ export default function AdminComics() {
 								className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
 							>
 								Đóng
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Create Chapter Modal */}
+			{showCreateChapterModal && creatingChapterStoryId && (
+				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+					<div className="w-full max-w-4xl max-h-[90vh] rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-900 flex flex-col">
+						{/* Header */}
+						<div className="flex items-center justify-between border-b border-zinc-200 p-4 dark:border-zinc-800">
+							<h2 className="text-lg font-semibold text-zinc-900 dark:text-white">Tạo chương mới</h2>
+							<button
+								onClick={() => {
+									setShowCreateChapterModal(false);
+									setCreatingChapterStoryId(null);
+									setCreateChapterData({
+										chapterNumber: 1,
+										title: '',
+									});
+									setChapterImages([]);
+									setChapterImagePreviews([]);
+									if (chapterImagesInputRef.current) {
+										chapterImagesInputRef.current.value = '';
+									}
+								}}
+								className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+							>
+								<X className="h-5 w-5" />
+							</button>
+						</div>
+
+						{/* Form Content */}
+						<div className="flex-1 overflow-y-auto p-6 space-y-4">
+							{/* Chapter Number */}
+							<div>
+								<label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+									Số chương <span className="text-red-500">*</span>
+								</label>
+								<input
+									type="number"
+									value={createChapterData.chapterNumber}
+									onChange={(e) => setCreateChapterData({ ...createChapterData, chapterNumber: parseInt(e.target.value) || 1 })}
+									min="1"
+									className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+								/>
+							</div>
+
+							{/* Chapter Title */}
+							<div>
+								<label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+									Tiêu đề chương
+								</label>
+								<input
+									type="text"
+									value={createChapterData.title}
+									onChange={(e) => setCreateChapterData({ ...createChapterData, title: e.target.value })}
+									placeholder="Nhập tiêu đề chương (tùy chọn)"
+									className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
+								/>
+							</div>
+
+							{/* Chapter Images Upload */}
+							<div>
+								<label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+									Ảnh chương {chapterImages.length > 0 && `(${chapterImages.length} ảnh đã chọn)`}
+								</label>
+								{chapterImagePreviews.length > 0 ? (
+									<div className="space-y-4">
+										<div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+											{chapterImagePreviews.map((preview, index) => (
+												<div key={index} className="group relative aspect-[3/4] overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-800">
+													<img
+														src={preview}
+														alt={`Preview ${index + 1}`}
+														className="h-full w-full object-cover"
+													/>
+													<div className="absolute top-2 left-2 rounded-full bg-black/70 px-2 py-0.5 text-xs font-medium text-white">
+														{index + 1}
+													</div>
+													<button
+														type="button"
+														onClick={() => handleRemoveChapterImage(index)}
+														className="absolute top-2 right-2 rounded-full bg-red-500 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-600"
+													>
+														<X className="h-3 w-3" />
+													</button>
+													<div className="absolute bottom-0 left-0 right-0 truncate bg-black/70 px-2 py-1 text-[10px] text-white">
+														{chapterImages[index]?.name}
+													</div>
+												</div>
+											))}
+										</div>
+										<button
+											type="button"
+											onClick={() => {
+												if (chapterImagesInputRef.current) {
+													chapterImagesInputRef.current.click();
+												}
+											}}
+											className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+										>
+											Thêm ảnh khác
+										</button>
+									</div>
+								) : (
+									<div
+										onDrop={handleChapterImagesDrop}
+										onDragOver={(e) => e.preventDefault()}
+										onDragEnter={(e) => e.preventDefault()}
+										className="relative"
+									>
+										<label
+											htmlFor="chapter-images-upload"
+											className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-8 transition hover:border-brand hover:bg-brand/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-brand"
+										>
+											<Upload size={32} className="mb-2 text-zinc-400" />
+											<p className="mb-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+												Kéo thả nhiều ảnh vào đây hoặc click để chọn
+											</p>
+											<p className="text-xs text-zinc-500 dark:text-zinc-400">
+												PNG, JPG, GIF tối đa 10MB mỗi ảnh. Có thể chọn nhiều ảnh cùng lúc.
+											</p>
+											<input
+												ref={chapterImagesInputRef}
+												id="chapter-images-upload"
+												type="file"
+												accept="image/*"
+												multiple
+												onChange={handleChapterImagesSelect}
+												className="hidden"
+												disabled={creatingChapter}
+											/>
+										</label>
+									</div>
+								)}
+							</div>
+						</div>
+
+						{/* Footer */}
+						<div className="flex items-center justify-end gap-3 border-t border-zinc-200 p-4 dark:border-zinc-800">
+							<button
+								onClick={() => {
+									setShowCreateChapterModal(false);
+									setCreatingChapterStoryId(null);
+									setCreateChapterData({
+										chapterNumber: 1,
+										title: '',
+									});
+									setChapterImages([]);
+									setChapterImagePreviews([]);
+									if (chapterImagesInputRef.current) {
+										chapterImagesInputRef.current.value = '';
+									}
+								}}
+								className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+								disabled={creatingChapter}
+							>
+								Hủy
+							</button>
+							<button
+								onClick={handleCreateChapter}
+								disabled={creatingChapter || !createChapterData.chapterNumber || createChapterData.chapterNumber < 1}
+								className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
+							>
+								{creatingChapter ? 'Đang tạo...' : 'Tạo chương'}
 							</button>
 						</div>
 					</div>
