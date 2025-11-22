@@ -106,8 +106,50 @@ export default function HomePage() {
 				// New stories: lấy 12 truyện tiếp theo
 				setNewStories(allStories.slice(4, 16));
 				
-				// Hot stories: lấy 4 truyện tiếp theo cho sidebar
-				setHotStories(allStories.slice(16, 20));
+				// Hot stories: Load ratings và sắp xếp theo rating để lấy top hot stories
+				const loadHotStories = async () => {
+					try {
+						// Load ratings cho tất cả stories
+						const storiesWithRatings = await Promise.all(
+							allStories.map(async (story) => {
+								try {
+									const ratingResponse = await api.get<{ averageStars: number | null }>(
+										endpoints.getRating(String(story.id))
+									);
+									const rating = ratingResponse.data.averageStars || 0;
+									return { ...story, rating };
+								} catch (err) {
+									console.error(`Failed to load rating for story ${story.id}:`, err);
+									return { ...story, rating: 0 };
+								}
+							})
+						);
+
+						// Sắp xếp theo rating (cao nhất trước), nếu rating bằng nhau thì sắp xếp theo ID (mới nhất trước)
+						const sortedByRating = storiesWithRatings.sort((a, b) => {
+							if (b.rating !== a.rating) {
+								return b.rating - a.rating;
+							}
+							const aId = typeof a.id === 'string' ? parseInt(a.id) : a.id;
+							const bId = typeof b.id === 'string' ? parseInt(b.id) : b.id;
+							return bId - aId;
+						});
+
+						// Lấy top 4-8 stories (bỏ qua những stories đã dùng cho hero)
+						const heroIds = new Set(allStories.slice(0, 4).map(s => String(s.id)));
+						const hotStoriesFiltered = sortedByRating
+							.filter(story => !heroIds.has(String(story.id)))
+							.slice(0, 4);
+						
+						setHotStories(hotStoriesFiltered);
+					} catch (err) {
+						console.error('Error loading hot stories:', err);
+						// Fallback: lấy 4 truyện tiếp theo (bỏ qua hero stories)
+						setHotStories(allStories.slice(4, 8));
+					}
+				};
+
+				loadHotStories();
 			} catch (error) {
 				console.error('Error loading stories:', error);
 				// Fallback to empty arrays on error
@@ -193,55 +235,83 @@ export default function HomePage() {
 			)}
 
 			{heroStories.length > 0 && (
-				<section className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-950 text-white shadow-lg dark:border-zinc-800">
-					<div className="relative h-[420px] w-full md:h-[480px]">
+				<section className="relative overflow-hidden rounded-2xl border border-zinc-200/50 bg-zinc-950 text-white shadow-xl dark:border-zinc-800/50">
+					<div className="relative aspect-[16/9] w-full max-h-[360px] md:max-h-[400px]">
 						{heroStories.map((story, index) => (
 						<Link
 							key={story.id}
 							to={`/story/${story.id}`}
 							className={`absolute inset-0 transition duration-[900ms] ease-out ${
-								index === slide ? 'opacity-100' : 'pointer-events-none opacity-0'
+								index === slide ? 'opacity-100 z-10' : 'pointer-events-none opacity-0 z-0'
 							}`}
 						>
-							<img
-								src={story.cover}
-								alt={story.title}
-								className="h-full w-full object-cover"
-								loading="lazy"
-							/>
-							<div className="absolute inset-0 bg-gradient-to-br from-black/80 via-black/50 to-black/20" />
-							<div className="absolute inset-x-0 bottom-0 p-6 pb-8 sm:p-10">
-								<div className="flex items-center gap-2 flex-wrap">
-									<div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-300">
-										<Flame size={14} />
+							{/* Image Container with proper aspect ratio */}
+							<div className="absolute inset-0 overflow-hidden">
+								<img
+									src={story.cover}
+									alt={story.title}
+									className="h-full w-full object-cover object-center"
+									style={{ 
+										objectFit: 'cover',
+										objectPosition: 'center',
+										imageRendering: 'high-quality'
+									}}
+									loading={index === slide ? 'eager' : 'lazy'}
+									onError={(e) => {
+										const target = e.target as HTMLImageElement;
+										target.src = `https://picsum.photos/seed/story-${story.id}/1200/675`;
+									}}
+								/>
+							</div>
+							{/* Gradient Overlay */}
+							<div className="absolute inset-0 bg-gradient-to-br from-black/75 via-black/50 to-black/25" />
+							
+							{/* Content */}
+							<div className="absolute inset-x-0 bottom-0 p-4 pb-6 sm:p-6 sm:pb-8">
+								<div className="flex items-center gap-2 flex-wrap mb-2">
+									<div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 backdrop-blur-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-300 border border-amber-300/30 shadow-lg">
+										<Flame size={12} />
 										{story.badge}
 									</div>
 									{story.isPremium && (
-										<div className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white shadow-lg ${
+										<div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg backdrop-blur-md border ${
 											hasAccess(String(story.id))
-												? 'bg-emerald-500/90'
-												: 'bg-amber-500/90'
+												? 'bg-emerald-500/80 border-emerald-300/30'
+												: 'bg-amber-500/80 border-amber-300/30'
 										}`}>
-											<Sparkles size={14} />
+											<Sparkles size={12} />
 											{hasAccess(String(story.id)) ? 'Đã mua' : 'Premium'}
 										</div>
 									)}
 								</div>
-								<h2 className="mt-4 text-2xl font-semibold sm:text-3xl md:text-4xl">{story.title}</h2>
-								<p className="mt-2 max-w-2xl text-sm text-zinc-200 sm:text-base">{story.description}</p>
-								<div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-300">
-									{story.genres?.map((genre) => (
-										<span key={genre} className="rounded-full bg-white/10 px-3 py-1">
-											{genre}
-										</span>
-									))}
-								</div>
+								<h2 className="text-xl font-bold leading-tight sm:text-2xl md:text-3xl text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)] line-clamp-2">
+									{story.title}
+								</h2>
+								{story.description && (
+									<p className="mt-1.5 max-w-xl text-xs text-zinc-200 sm:text-sm line-clamp-2 drop-shadow-[0_1px_4px_rgba(0,0,0,0.6)]">
+										{story.description}
+									</p>
+								)}
+								{story.genres && story.genres.length > 0 && (
+									<div className="mt-2.5 flex flex-wrap gap-1.5">
+										{story.genres.slice(0, 3).map((genre) => (
+											<span key={genre} className="rounded-full bg-white/10 backdrop-blur-sm px-2 py-0.5 text-[10px] text-zinc-200 border border-white/20">
+												{genre}
+											</span>
+										))}
+										{story.genres.length > 3 && (
+											<span className="rounded-full bg-white/10 backdrop-blur-sm px-2 py-0.5 text-[10px] text-zinc-300 border border-white/20">
+												+{story.genres.length - 3}
+											</span>
+										)}
+									</div>
+								)}
 							</div>
 						</Link>
 						))}
 
 						<button
-							className="absolute left-6 top-1/2 -translate-y-1/2 rounded-full bg-white/15 p-2 text-white backdrop-blur transition hover:bg-white/25"
+							className="absolute left-3 top-1/2 z-20 -translate-y-1/2 rounded-full bg-black/40 backdrop-blur-md p-2 text-white shadow-lg transition-all hover:bg-black/60 hover:scale-110 border border-white/20"
 							onClick={(event) => {
 								event.preventDefault();
 								event.stopPropagation();
@@ -250,10 +320,10 @@ export default function HomePage() {
 							}}
 							aria-label="Slide trước"
 						>
-							<ArrowLeft size={18} />
+							<ArrowLeft size={16} />
 						</button>
 						<button
-							className="absolute right-6 top-1/2 -translate-y-1/2 rounded-full bg-white/15 p-2 text-white backdrop-blur transition hover:bg-white/25"
+							className="absolute right-3 top-1/2 z-20 -translate-y-1/2 rounded-full bg-black/40 backdrop-blur-md p-2 text-white shadow-lg transition-all hover:bg-black/60 hover:scale-110 border border-white/20"
 							onClick={(event) => {
 								event.preventDefault();
 								event.stopPropagation();
@@ -262,19 +332,23 @@ export default function HomePage() {
 							}}
 							aria-label="Slide tiếp"
 						>
-							<ArrowRight size={18} />
+							<ArrowRight size={16} />
 						</button>
 					</div>
-					<div className="relative flex items-center justify-between border-t border-white/10 p-4 sm:p-6">
-						<div className="flex items-center gap-3 text-white">
-							<h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">Hiện đang xem</h3>
-							<span className="text-base font-semibold">{heroActive?.title || ''}</span>
+					<div className="relative flex items-center justify-between border-t border-white/10 bg-black/20 backdrop-blur-sm p-3 sm:p-4">
+						<div className="flex items-center gap-2 sm:gap-3 text-white min-w-0 flex-1">
+							<h3 className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-white/60 flex-shrink-0">Đang xem</h3>
+							<span className="text-sm sm:text-base font-semibold truncate">{heroActive?.title || ''}</span>
 						</div>
-						<div className="flex gap-2">
+						<div className="flex gap-1.5 sm:gap-2 flex-shrink-0">
 							{heroStories.map((_, index) => (
 								<button
 									key={index}
-									className={`h-1.5 w-12 rounded-full transition ${index === slide ? 'bg-white' : 'bg-white/30'}`}
+									className={`h-1.5 w-8 sm:w-10 rounded-full transition-all duration-300 ${
+										index === slide 
+											? 'bg-white shadow-lg shadow-white/50' 
+											: 'bg-white/30 hover:bg-white/50'
+									}`}
 									onClick={() => {
 										setAutoPlay(false);
 										setSlide(index);

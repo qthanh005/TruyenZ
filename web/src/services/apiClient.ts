@@ -40,6 +40,7 @@ export const endpoints = {
 	// User Service - Auth
 	register: () => '/api/auth/register',
 	login: () => '/api/auth/login',
+	googleAuth: () => '/api/auth/google',
 	refresh: () => '/api/auth/refresh',
 	logout: () => '/api/auth/logout',
 	// User Service
@@ -119,6 +120,9 @@ export const endpoints = {
 	
 	// Rating Service
 	rating: (storyId: string) => `/api/rating/${storyId}`,
+	getRating: (storyId: string | number) => `/api/rating/${storyId}`,
+	getUserRating: (userId: string | number, storyId: string | number) => `/api/rating/user/${userId}/story/${storyId}`,
+	submitRating: () => '/api/rating',
 
 	// Search & Recommendation
 	recommend: () => '/recommend',

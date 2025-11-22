@@ -9,6 +9,7 @@ import StoryDetailPage from '@/pages/StoryDetailPage';
 import ChapterReaderPage from '@/pages/ChapterReaderPage';
 import ProfilePage from '@/pages/ProfilePage';
 import OAuthCallbackPage from '@/pages/OAuthCallbackPage';
+import GoogleCallbackPage from '@/pages/GoogleCallbackPage';
 import HotStoriesPage from '@/pages/HotStoriesPage';
 import CategoriesPage from '@/pages/CategoriesPage';
 import HistoryPage from '@/pages/HistoryPage';
@@ -132,6 +133,10 @@ export default function App() {
 								<OAuthCallbackPage />
 							</Layout>
 						}
+					/>
+					<Route
+						path="/auth/google/callback"
+						element={<GoogleCallbackPage />}
 					/>
 					<Route
 						path="/me"

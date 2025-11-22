@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import { api, endpoints } from '@/services/apiClient';
+import { useWalletStore } from './walletStore';
 
 export type PaymentMethod = 'vnpay';
 
@@ -80,6 +81,12 @@ export const usePremiumStore = create<PremiumState>()(
 						checkoutStory: undefined,
 						isProcessing: false,
 					}));
+
+					// Sync balance sau khi mua thành công
+					const walletStore = useWalletStore.getState();
+					walletStore.syncBalance().catch((err) => {
+						console.error('Failed to sync balance after purchase:', err);
+					});
 				} catch (error) {
 					const message = axios.isAxiosError(error)
 						? error.response?.data?.message || error.response?.data?.error || 'Thanh toán thất bại, vui lòng thử lại.'

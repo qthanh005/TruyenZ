@@ -118,6 +118,9 @@ export default function StoryDetailPage() {
 	const [isCheckingPurchase, setIsCheckingPurchase] = useState(false);
 	const [isFollowing, setIsFollowing] = useState(false);
 	const [isTogglingFollow, setIsTogglingFollow] = useState(false);
+	const [averageRating, setAverageRating] = useState<number | null>(null);
+	const [userRating, setUserRating] = useState<number | null>(null);
+	const [submittingRating, setSubmittingRating] = useState(false);
 
 	// Load story details from API
 		useEffect(() => {
@@ -187,6 +190,32 @@ export default function StoryDetailPage() {
 					setHasAccess(!isPremium);
 				}
 
+				// Load rating
+				try {
+					const ratingResponse = await api.get<{ averageStars: number | null }>(endpoints.getRating(storyData.id));
+					setAverageRating(ratingResponse.data.averageStars || null);
+				} catch (err) {
+					console.error('Failed to load rating:', err);
+					setAverageRating(null);
+				}
+
+				// Load user rating if authenticated
+				if (isAuthenticated && user) {
+					try {
+						const userId = (user as any)?.id || (user as any)?.profile?.sub || (user as any)?.sub;
+						if (userId) {
+							const userIdNum = typeof userId === 'number' ? userId : parseInt(String(userId), 10);
+							if (!isNaN(userIdNum)) {
+								const userRatingResponse = await api.get<{ stars: number }>(endpoints.getUserRating(userIdNum, storyData.id));
+								setUserRating(userRatingResponse.data.stars || null);
+							}
+						}
+					} catch (err) {
+						console.error('Failed to load user rating:', err);
+						setUserRating(null);
+					}
+				}
+
 				// Load chapters
 				const chaptersResponse = await api.get<ChapterResponse[]>(endpoints.chapters(storyId));
 				const chaptersData = chaptersResponse.data;
@@ -212,7 +241,7 @@ export default function StoryDetailPage() {
 		};
 
 		loadStory();
-	}, [storyId]);
+	}, [storyId, isAuthenticated, user, checkPurchase, purchases]);
 
 	// Load similar stories based on genres
 	useEffect(() => {
@@ -502,6 +531,52 @@ export default function StoryDetailPage() {
 			toast.error(errorMessage);
 		} finally {
 			setIsTogglingFollow(false);
+		}
+	};
+
+	const handleRatingClick = async (stars: number) => {
+		if (!story || !isAuthenticated || submittingRating) return;
+
+		if (!user) {
+			toast.error('Vui lòng đăng nhập để đánh giá truyện');
+			return;
+		}
+
+		try {
+			setSubmittingRating(true);
+			const userId = (user as any)?.id || (user as any)?.profile?.sub || (user as any)?.sub;
+			if (!userId) {
+				toast.error('Không thể xác định người dùng');
+				return;
+			}
+
+			const userIdNum = typeof userId === 'number' ? userId : parseInt(String(userId), 10);
+			if (isNaN(userIdNum)) {
+				toast.error('ID người dùng không hợp lệ');
+				return;
+			}
+
+			// storyAuthorId có thể null - backend sẽ xử lý
+			await api.post(endpoints.submitRating(), {
+				userId: userIdNum,
+				storyId: Number(story.id),
+				stars: stars,
+				storyAuthorId: null, // Có thể để null, backend sẽ xử lý
+			});
+
+			setUserRating(stars);
+			
+			// Reload average rating
+			const ratingResponse = await api.get<{ averageStars: number | null }>(endpoints.getRating(String(story.id)));
+			setAverageRating(ratingResponse.data.averageStars || null);
+
+			toast.success('Đánh giá thành công!');
+		} catch (err: any) {
+			console.error('Failed to submit rating:', err);
+			const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Không thể đánh giá. Vui lòng thử lại.';
+			toast.error(errorMessage);
+		} finally {
+			setSubmittingRating(false);
 		}
 	};
 
@@ -1111,7 +1186,14 @@ export default function StoryDetailPage() {
 										<Star size={14} />
 										Đánh giá
 									</p>
-									<p className="mt-1 text-xl font-semibold text-white">{mockStats.rating}/5</p>
+									<p className="mt-1 text-xl font-semibold text-white">
+										{averageRating !== null ? averageRating.toFixed(1) : 'N/A'}/5
+									</p>
+									{averageRating !== null && (
+										<p className="mt-1 text-xs text-zinc-400">
+											{Math.round(averageRating * 10) / 10} sao
+										</p>
+									)}
 								</div>
 								<div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
 									<p className="text-xs uppercase tracking-wide text-zinc-300">Cập nhật</p>
@@ -1124,6 +1206,42 @@ export default function StoryDetailPage() {
 										'Mô tả truyện chưa được cập nhật. Hiện chúng tôi đang thu thập nội dung chi tiết để mang đến trải nghiệm tốt hơn.'}
 								</p>
 							</div>
+							{/* Rating Component */}
+							{isAuthenticated && (
+								<div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+									<div className="flex items-center justify-between">
+										<div>
+											<p className="text-sm font-semibold text-white">Đánh giá truyện này</p>
+											<p className="mt-1 text-xs text-zinc-300">
+												{userRating ? `Bạn đã đánh giá ${userRating} sao` : 'Chọn số sao để đánh giá'}
+											</p>
+										</div>
+										<div className="flex items-center gap-1">
+											{[1, 2, 3, 4, 5].map((star) => (
+												<button
+													key={star}
+													type="button"
+													onClick={() => handleRatingClick(star)}
+													disabled={submittingRating}
+													className={`transition-all hover:scale-110 ${
+														submittingRating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+													}`}
+													title={`Đánh giá ${star} sao`}
+												>
+													<Star
+														size={28}
+														className={
+															userRating && star <= userRating
+																? 'fill-yellow-400 text-yellow-400'
+																: 'fill-zinc-600 text-zinc-600'
+														}
+													/>
+												</button>
+											))}
+										</div>
+									</div>
+								</div>
+							)}
 							<div className="flex flex-wrap items-center gap-3 text-sm">
 								{story.isPremium ? (
 									hasAccess ? (

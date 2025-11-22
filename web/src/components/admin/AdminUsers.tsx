@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, endpoints } from '@/services/apiClient';
-import { Search, Filter, Users as UsersIcon, ShieldHalf, AlertCircle, UserCheck, ArrowUpRight, CirclePlus } from 'lucide-react';
+import { Search, Filter, Users as UsersIcon, ShieldHalf, AlertCircle, UserCheck, ArrowUpRight, CirclePlus, X } from 'lucide-react';
 
 type AdminUser = {
 	id: number;
