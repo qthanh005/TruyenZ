@@ -117,12 +117,26 @@ export const endpoints = {
 	updateComment: (commentId: string) => `/api/comments/${commentId}`,
 	deleteComment: (commentId: string) => `/api/comments/${commentId}/delete`,
 	blockComment: (commentId: string) => `/api/comments/${commentId}/block`,
+	unblockComment: (commentId: string) => `/api/comments/${commentId}/unblock`,
+	getAllCommentsForAdmin: (storyId?: string | number, isDeleted?: string) => {
+		const params = new URLSearchParams();
+		if (storyId !== undefined) params.append('storyId', String(storyId));
+		if (isDeleted !== undefined) params.append('isDeleted', isDeleted);
+		const query = params.toString();
+		return `/api/comments/admin/all${query ? '?' + query : ''}`;
+	},
 	
 	// Rating Service
 	rating: (storyId: string) => `/api/rating/${storyId}`,
 	getRating: (storyId: string | number) => `/api/rating/${storyId}`,
 	getUserRating: (userId: string | number, storyId: string | number) => `/api/rating/user/${userId}/story/${storyId}`,
 	submitRating: () => '/api/rating',
+
+	// Reaction Service
+	reactToComment: () => '/api/reaction',
+	removeReaction: (userId: string | number, commentId: string | number) => `/api/reaction?userId=${userId}&commentId=${commentId}`,
+	getReactionCounts: (commentId: string | number) => `/api/reaction/${commentId}`, // POST endpoint in backend
+	getUserReaction: (userId: string | number, commentId: string | number) => `/api/reaction/user/${userId}/comment/${commentId}`,
 
 	// Search & Recommendation
 	recommend: () => '/recommend',

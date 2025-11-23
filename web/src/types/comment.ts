@@ -31,3 +31,26 @@ export type CommentWithUser = CommentResponse & {
 	};
 };
 
+// Reaction types
+export type ReactionType = 'LIKE' | 'TYM' | 'HAHA' | 'SAD' | 'ANGRY' | 'WOW';
+
+export type ReactionRequest = {
+	userId: number;
+	commentId: number;
+	type: ReactionType;
+	authorId?: number | null;
+	storyId?: number | null;
+};
+
+export type ReactionResponse = {
+	commentId: number;
+	type: ReactionType | null;
+	userId: number;
+	likeCount: number;
+	tymCount: number;
+	hahaCount: number;
+	sadCount: number;
+	angryCount: number;
+	wowCount: number;
+};
+

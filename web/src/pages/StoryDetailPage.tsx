@@ -12,7 +12,7 @@ import { apiConfig } from '@/shared/config/env';
 import { useAuth } from '@/providers/AuthProvider';
 import { useToast } from '@/hooks/useToast';
 import { useConfirm } from '@/hooks/useConfirm';
-import type { CommentResponse, CommentRequest, CommentWithUser } from '@/types/comment';
+import type { CommentResponse, CommentRequest, CommentWithUser, ReactionRequest, ReactionResponse, ReactionType } from '@/types/comment';
 import type { UserInfo } from '@/types/user';
 
 type Chapter = { id: string | number; name: string; index?: number; chapterNumber?: number };
@@ -121,6 +121,12 @@ export default function StoryDetailPage() {
 	const [averageRating, setAverageRating] = useState<number | null>(null);
 	const [userRating, setUserRating] = useState<number | null>(null);
 	const [submittingRating, setSubmittingRating] = useState(false);
+	// Reaction states
+	const [reactionCounts, setReactionCounts] = useState<Map<number, ReactionResponse>>(new Map()); // Map<commentId, ReactionResponse>
+	const [userReactions, setUserReactions] = useState<Map<number, ReactionType>>(new Map()); // Map<commentId, ReactionType> - Track which comments user has liked
+	const [likingCommentId, setLikingCommentId] = useState<number | null>(null); // Track which comment is being liked/unliked
+	const [openReactionPicker, setOpenReactionPicker] = useState<number | null>(null); // Track which comment has reaction picker open
+	const [reactionPickerTimeout, setReactionPickerTimeout] = useState<NodeJS.Timeout | null>(null); // Timeout for closing picker
 
 	// Load story details from API
 		useEffect(() => {
@@ -320,6 +326,10 @@ export default function StoryDetailPage() {
 					setCommentLoading(true);
 				}
 				setCommentError(null);
+				// Reset user reactions khi load lại comments
+				if (commentsReloadKey === 0) {
+					setUserReactions(new Map());
+				}
 
 				// Get root comments by story ID (comments without chapterId or parentId)
 				const response = await api.get<CommentResponse[]>(endpoints.getRootCommentsByStory(storyId));
@@ -373,6 +383,41 @@ export default function StoryDetailPage() {
 							console.error(`Failed to count replies for comment ${comment.id}:`, err);
 						}
 
+						// Load reaction counts cho comment này
+						try {
+							const reactionResponse = await api.post<Record<string, number>>(endpoints.getReactionCounts(comment.id));
+							const counts = reactionResponse.data;
+							const reactionData: ReactionResponse = {
+								commentId: comment.id,
+								type: null,
+								userId: 0,
+								likeCount: counts['LIKE'] || 0,
+								tymCount: counts['TYM'] || 0,
+								hahaCount: counts['HAHA'] || 0,
+								sadCount: counts['SAD'] || 0,
+								angryCount: counts['ANGRY'] || 0,
+								wowCount: counts['WOW'] || 0,
+							};
+							setReactionCounts((prev) => new Map(prev).set(comment.id, reactionData));
+						} catch (err) {
+							console.error(`Failed to load reaction counts for comment ${comment.id}:`, err);
+							// Set default counts
+							const defaultReaction: ReactionResponse = {
+								commentId: comment.id,
+								type: null,
+								userId: 0,
+								likeCount: 0,
+								tymCount: 0,
+								hahaCount: 0,
+								sadCount: 0,
+								angryCount: 0,
+								wowCount: 0,
+							};
+							setReactionCounts((prev) => new Map(prev).set(comment.id, defaultReaction));
+						}
+
+						// User reactions sẽ được load sau khi tất cả comments đã load xong
+
 						return commentWithUser;
 					})
 				);
@@ -385,6 +430,49 @@ export default function StoryDetailPage() {
 				// Chỉ reset nếu đây là lần load đầu tiên (commentsReloadKey === 0)
 				if (commentsReloadKey === 0) {
 					setDisplayedComments(5);
+				}
+
+				// Load user reactions cho tất cả comments sau khi đã load xong comments
+				// Điều này đảm bảo user reactions được load đúng cách
+				if (isAuthenticated && user) {
+					try {
+						const userId = (user as any)?.id || (user as any)?.profile?.sub || (user as any)?.sub;
+						if (userId) {
+							const userIdNum = typeof userId === 'number' ? userId : parseInt(String(userId), 10);
+							if (!isNaN(userIdNum)) {
+								// Load user reactions cho tất cả comments
+								const userReactionsMap = new Map<number, ReactionType>();
+								await Promise.all(
+									rootCommentsWithUser.map(async (comment) => {
+										try {
+											const userReactionResponse = await api.get<{ type: string | null }>(endpoints.getUserReaction(userIdNum, comment.id));
+											const reactionType = userReactionResponse.data.type;
+											if (reactionType && reactionType !== 'null') {
+												userReactionsMap.set(comment.id, reactionType as ReactionType);
+											}
+										} catch (err: any) {
+											// Ignore 404 errors (user hasn't reacted yet)
+											if (err.response?.status !== 404) {
+												console.error(`Failed to load user reaction for comment ${comment.id}:`, err);
+											}
+										}
+									})
+								);
+								// Set all user reactions at once
+								if (userReactionsMap.size > 0) {
+									setUserReactions((prev) => {
+										const newMap = new Map(prev);
+										userReactionsMap.forEach((type, commentId) => {
+											newMap.set(commentId, type);
+										});
+										return newMap;
+									});
+								}
+							}
+						}
+					} catch (err) {
+						console.error('Failed to load user reactions:', err);
+					}
 				}
 			} catch (err: any) {
 				console.error('Error loading comments:', err);
@@ -424,7 +512,7 @@ export default function StoryDetailPage() {
 		};
 
 		loadComments();
-	}, [storyId, commentsReloadKey]);
+	}, [storyId, commentsReloadKey, isAuthenticated, user]);
 
 	useEffect(() => {
 		if (!storyId) return;
@@ -655,6 +743,106 @@ export default function StoryDetailPage() {
 		}
 	};
 
+	// Handle react/unreact comment (all reaction types)
+	const handleReact = async (commentId: number, reactionType: ReactionType) => {
+		if (!isAuthenticated || !user) {
+			toast.warning('Bạn cần đăng nhập để phản ứng bình luận');
+			return;
+		}
+
+		const currentUserId = getCurrentUserId();
+		if (!currentUserId) {
+			toast.warning('Không thể xác định người dùng');
+			return;
+		}
+
+		const currentReaction = userReactions.get(commentId);
+		
+		try {
+			setLikingCommentId(commentId);
+			
+			// Nếu đã react cùng loại thì remove, nếu khác loại thì thay đổi
+			if (currentReaction === reactionType) {
+				// Remove reaction
+				await api.delete(endpoints.removeReaction(currentUserId, commentId));
+				
+				// Update local state
+				setUserReactions((prev) => {
+					const newMap = new Map(prev);
+					newMap.delete(commentId);
+					return newMap;
+				});
+				
+				// Reload reaction counts
+				const reactionResponse = await api.post<Record<string, number>>(endpoints.getReactionCounts(commentId));
+				const counts = reactionResponse.data;
+				const reactionData: ReactionResponse = {
+					commentId: commentId,
+					type: null,
+					userId: 0,
+					likeCount: counts['LIKE'] || 0,
+					tymCount: counts['TYM'] || 0,
+					hahaCount: counts['HAHA'] || 0,
+					sadCount: counts['SAD'] || 0,
+					angryCount: counts['ANGRY'] || 0,
+					wowCount: counts['WOW'] || 0,
+				};
+				setReactionCounts((prev) => new Map(prev).set(commentId, reactionData));
+			} else {
+				// Add or change reaction
+				const comment = [...comments, ...Array.from(replies.values()).flat(), ...Array.from(nestedReplies.values()).flat()]
+					.find(c => c.id === commentId);
+				
+				const request: ReactionRequest = {
+					userId: currentUserId,
+					commentId: commentId,
+					type: reactionType,
+					authorId: comment?.userId || null,
+					storyId: story ? Number(story.id) : null,
+				};
+				
+				const response = await api.post<ReactionResponse>(endpoints.reactToComment(), request);
+				const reactionData = response.data;
+				
+				// Update local state
+				setUserReactions((prev) => new Map(prev).set(commentId, reactionType));
+				setReactionCounts((prev) => new Map(prev).set(commentId, reactionData));
+			}
+		} catch (err: any) {
+			console.error('Error reacting to comment:', err);
+			const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Không thể phản ứng bình luận. Vui lòng thử lại sau.';
+			toast.error(errorMessage);
+		} finally {
+			setLikingCommentId(null);
+		}
+	};
+
+	// Helper function to get reaction emoji
+	const getReactionEmoji = (type: ReactionType): string => {
+		switch (type) {
+			case 'LIKE': return '❤️';
+			case 'TYM': return '💛';
+			case 'HAHA': return '😂';
+			case 'SAD': return '😢';
+			case 'ANGRY': return '😠';
+			case 'WOW': return '😮';
+			default: return '👍';
+		}
+	};
+
+	// Helper function to get reaction label
+	const getReactionLabel = (type: ReactionType): string => {
+		switch (type) {
+			case 'LIKE': return 'Thích';
+			case 'TYM': return 'Yêu thích';
+			case 'HAHA': return 'Haha';
+			case 'SAD': return 'Buồn';
+			case 'ANGRY': return 'Giận';
+			case 'WOW': return 'Wow';
+			default: return 'Phản ứng';
+		}
+	};
+
 	const loadReplies = async (parentId: number) => {
 		if (loadingReplies.has(parentId) || replies.has(parentId)) return;
 
@@ -704,7 +892,7 @@ export default function StoryDetailPage() {
 				})
 			);
 
-			// Đếm nested replies cho mỗi reply
+			// Đếm nested replies và load reaction counts cho mỗi reply
 			const nestedCountsMap = new Map<number, number>();
 			for (const reply of repliesWithUser) {
 				try {
@@ -715,6 +903,60 @@ export default function StoryDetailPage() {
 					}
 				} catch (err) {
 					// Ignore errors when counting nested replies
+				}
+
+				// Load reaction counts cho reply
+				try {
+					const reactionResponse = await api.post<Record<string, number>>(endpoints.getReactionCounts(reply.id));
+					const counts = reactionResponse.data;
+					const reactionData: ReactionResponse = {
+						commentId: reply.id,
+						type: null,
+						userId: 0,
+						likeCount: counts['LIKE'] || 0,
+						tymCount: counts['TYM'] || 0,
+						hahaCount: counts['HAHA'] || 0,
+						sadCount: counts['SAD'] || 0,
+						angryCount: counts['ANGRY'] || 0,
+						wowCount: counts['WOW'] || 0,
+					};
+					setReactionCounts((prev) => new Map(prev).set(reply.id, reactionData));
+				} catch (err) {
+					console.error(`Failed to load reaction counts for reply ${reply.id}:`, err);
+					// Set default counts
+					const defaultReaction: ReactionResponse = {
+						commentId: reply.id,
+						type: null,
+						userId: 0,
+						likeCount: 0,
+						tymCount: 0,
+						hahaCount: 0,
+						sadCount: 0,
+						angryCount: 0,
+						wowCount: 0,
+					};
+					setReactionCounts((prev) => new Map(prev).set(reply.id, defaultReaction));
+				}
+
+				// Check if user has liked this reply (if authenticated)
+				if (isAuthenticated && user) {
+					try {
+						const userId = (user as any)?.id || (user as any)?.profile?.sub || (user as any)?.sub;
+						if (userId) {
+							const userIdNum = typeof userId === 'number' ? userId : parseInt(String(userId), 10);
+							if (!isNaN(userIdNum)) {
+								// Get user's reaction for this reply
+								const userReactionResponse = await api.get<{ type: string | null }>(endpoints.getUserReaction(userIdNum, reply.id));
+								const reactionType = userReactionResponse.data.type;
+								if (reactionType) {
+									setUserReactions((prev) => new Map(prev).set(reply.id, reactionType as ReactionType));
+								}
+							}
+						}
+					} catch (err) {
+						// Ignore errors for checking user reactions
+						console.error(`Failed to load user reaction for reply ${reply.id}:`, err);
+					}
 				}
 			}
 
@@ -786,6 +1028,63 @@ export default function StoryDetailPage() {
 					}
 				})
 			);
+
+			// Load reaction counts và user reactions cho nested replies
+			for (const nestedReply of nestedRepliesWithUser) {
+				// Load reaction counts
+				try {
+					const reactionResponse = await api.post<Record<string, number>>(endpoints.getReactionCounts(nestedReply.id));
+					const counts = reactionResponse.data;
+					const reactionData: ReactionResponse = {
+						commentId: nestedReply.id,
+						type: null,
+						userId: 0,
+						likeCount: counts['LIKE'] || 0,
+						tymCount: counts['TYM'] || 0,
+						hahaCount: counts['HAHA'] || 0,
+						sadCount: counts['SAD'] || 0,
+						angryCount: counts['ANGRY'] || 0,
+						wowCount: counts['WOW'] || 0,
+					};
+					setReactionCounts((prev) => new Map(prev).set(nestedReply.id, reactionData));
+				} catch (err) {
+					console.error(`Failed to load reaction counts for nested reply ${nestedReply.id}:`, err);
+					// Set default counts
+					const defaultReaction: ReactionResponse = {
+						commentId: nestedReply.id,
+						type: null,
+						userId: 0,
+						likeCount: 0,
+						tymCount: 0,
+						hahaCount: 0,
+						sadCount: 0,
+						angryCount: 0,
+						wowCount: 0,
+					};
+					setReactionCounts((prev) => new Map(prev).set(nestedReply.id, defaultReaction));
+				}
+
+				// Check if user has liked this nested reply (if authenticated)
+				if (isAuthenticated && user) {
+					try {
+						const userId = (user as any)?.id || (user as any)?.profile?.sub || (user as any)?.sub;
+						if (userId) {
+							const userIdNum = typeof userId === 'number' ? userId : parseInt(String(userId), 10);
+							if (!isNaN(userIdNum)) {
+								// Get user's reaction for this nested reply
+								const userReactionResponse = await api.get<{ type: string | null }>(endpoints.getUserReaction(userIdNum, nestedReply.id));
+								const reactionType = userReactionResponse.data.type;
+								if (reactionType) {
+									setUserReactions((prev) => new Map(prev).set(nestedReply.id, reactionType as ReactionType));
+								}
+							}
+						}
+					} catch (err) {
+						// Ignore errors for checking user reactions
+						console.error(`Failed to load user reaction for nested reply ${nestedReply.id}:`, err);
+					}
+				}
+			}
 
 			setNestedReplies((prev) => new Map(prev).set(replyId, nestedRepliesWithUser));
 			setShowNestedReplies((prev) => new Set(prev).add(replyId));
@@ -1532,7 +1831,130 @@ export default function StoryDetailPage() {
 											<p className="mt-3 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-300">
 												{comment.content}
 											</p>
-											<div className="mt-3 flex items-center gap-4">
+											<div className="mt-3 flex items-center gap-4 flex-wrap">
+												{/* Reaction buttons */}
+												<div className="flex items-center gap-2">
+													{isAuthenticated ? (
+														<div className="flex items-center gap-1">
+															{/* Main reaction button with dropdown */}
+															<div 
+																className="relative"
+																onMouseEnter={() => {
+																	if (reactionPickerTimeout) {
+																		clearTimeout(reactionPickerTimeout);
+																		setReactionPickerTimeout(null);
+																	}
+																	setOpenReactionPicker(comment.id);
+																}}
+																onMouseLeave={() => {
+																	const timeout = setTimeout(() => {
+																		setOpenReactionPicker(null);
+																	}, 200); // Delay 200ms before closing
+																	setReactionPickerTimeout(timeout);
+																}}
+															>
+																<button
+																	disabled={likingCommentId === comment.id}
+																	className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
+																		userReactions.get(comment.id)
+																			? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+																			: 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+																	} disabled:opacity-50`}
+																>
+																	{likingCommentId === comment.id ? (
+																		<div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+																	) : userReactions.get(comment.id) ? (
+																		<span className="text-base">{getReactionEmoji(userReactions.get(comment.id)!)}</span>
+																	) : (
+																		<span className="text-base">👍</span>
+																	)}
+																	<span>{userReactions.get(comment.id) ? getReactionLabel(userReactions.get(comment.id)!) : 'Phản ứng'}</span>
+																</button>
+																{/* Reaction picker dropdown */}
+																{openReactionPicker === comment.id && (
+																	<div 
+																		className="absolute left-0 bottom-full mb-2 flex bg-white dark:bg-zinc-900 rounded-lg shadow-lg border border-zinc-200 dark:border-zinc-700 p-1 z-10"
+																		onMouseEnter={() => {
+																			if (reactionPickerTimeout) {
+																				clearTimeout(reactionPickerTimeout);
+																				setReactionPickerTimeout(null);
+																			}
+																		}}
+																		onMouseLeave={() => {
+																			const timeout = setTimeout(() => {
+																				setOpenReactionPicker(null);
+																			}, 200);
+																			setReactionPickerTimeout(timeout);
+																		}}
+																	>
+																		{(['LIKE', 'TYM', 'HAHA', 'SAD', 'ANGRY', 'WOW'] as ReactionType[]).map((type) => (
+																			<button
+																				key={type}
+																				onClick={() => {
+																					handleReact(comment.id, type);
+																					setOpenReactionPicker(null);
+																				}}
+																				className={`p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors ${
+																					userReactions.get(comment.id) === type ? 'bg-zinc-100 dark:bg-zinc-800' : ''
+																				}`}
+																				title={getReactionLabel(type)}
+																			>
+																				<span className="text-xl">{getReactionEmoji(type)}</span>
+																			</button>
+																		))}
+																	</div>
+																)}
+															</div>
+															{/* Show reaction counts */}
+															{reactionCounts.get(comment.id) && (
+																<div className="flex items-center gap-1 text-xs text-zinc-500">
+																	{reactionCounts.get(comment.id)!.likeCount > 0 && (
+																		<span>❤️ {reactionCounts.get(comment.id)!.likeCount}</span>
+																	)}
+																	{reactionCounts.get(comment.id)!.tymCount > 0 && (
+																		<span>💛 {reactionCounts.get(comment.id)!.tymCount}</span>
+																	)}
+																	{reactionCounts.get(comment.id)!.hahaCount > 0 && (
+																		<span>😂 {reactionCounts.get(comment.id)!.hahaCount}</span>
+																	)}
+																	{reactionCounts.get(comment.id)!.sadCount > 0 && (
+																		<span>😢 {reactionCounts.get(comment.id)!.sadCount}</span>
+																	)}
+																	{reactionCounts.get(comment.id)!.angryCount > 0 && (
+																		<span>😠 {reactionCounts.get(comment.id)!.angryCount}</span>
+																	)}
+																	{reactionCounts.get(comment.id)!.wowCount > 0 && (
+																		<span>😮 {reactionCounts.get(comment.id)!.wowCount}</span>
+																	)}
+																</div>
+															)}
+														</div>
+													) : (
+														/* Show reaction counts for non-authenticated users */
+														reactionCounts.get(comment.id) && (
+															<div className="flex items-center gap-2 text-xs text-zinc-500">
+																{reactionCounts.get(comment.id)!.likeCount > 0 && (
+																	<span>❤️ {reactionCounts.get(comment.id)!.likeCount}</span>
+																)}
+																{reactionCounts.get(comment.id)!.tymCount > 0 && (
+																	<span>💛 {reactionCounts.get(comment.id)!.tymCount}</span>
+																)}
+																{reactionCounts.get(comment.id)!.hahaCount > 0 && (
+																	<span>😂 {reactionCounts.get(comment.id)!.hahaCount}</span>
+																)}
+																{reactionCounts.get(comment.id)!.sadCount > 0 && (
+																	<span>😢 {reactionCounts.get(comment.id)!.sadCount}</span>
+																)}
+																{reactionCounts.get(comment.id)!.angryCount > 0 && (
+																	<span>😠 {reactionCounts.get(comment.id)!.angryCount}</span>
+																)}
+																{reactionCounts.get(comment.id)!.wowCount > 0 && (
+																	<span>😮 {reactionCounts.get(comment.id)!.wowCount}</span>
+																)}
+															</div>
+														)
+													)}
+												</div>
 												{isAuthenticated && (
 													<button
 														onClick={() => {
@@ -1659,7 +2081,122 @@ export default function StoryDetailPage() {
 																	<p className="mt-2 whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300">
 																		{reply.content}
 																	</p>
-																	<div className="mt-2 flex items-center gap-3">
+																	<div className="mt-2 flex items-center gap-3 flex-wrap">
+																		{isAuthenticated ? (
+																			<div className="flex items-center gap-1">
+																				<div 
+																					className="relative"
+																					onMouseEnter={() => {
+																						if (reactionPickerTimeout) {
+																							clearTimeout(reactionPickerTimeout);
+																							setReactionPickerTimeout(null);
+																						}
+																						setOpenReactionPicker(reply.id);
+																					}}
+																					onMouseLeave={() => {
+																						const timeout = setTimeout(() => {
+																							setOpenReactionPicker(null);
+																						}, 200);
+																						setReactionPickerTimeout(timeout);
+																					}}
+																				>
+																					<button
+																						disabled={likingCommentId === reply.id}
+																						className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-xs transition-colors ${
+																							userReactions.get(reply.id)
+																								? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+																								: 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+																						} disabled:opacity-50`}
+																					>
+																						{likingCommentId === reply.id ? (
+																							<div className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+																						) : userReactions.get(reply.id) ? (
+																							<span className="text-sm">{getReactionEmoji(userReactions.get(reply.id)!)}</span>
+																						) : (
+																							<span className="text-sm">👍</span>
+																						)}
+																					</button>
+																					{openReactionPicker === reply.id && (
+																						<div 
+																							className="absolute left-0 bottom-full mb-2 flex bg-white dark:bg-zinc-900 rounded-lg shadow-lg border border-zinc-200 dark:border-zinc-700 p-1 z-10"
+																							onMouseEnter={() => {
+																								if (reactionPickerTimeout) {
+																									clearTimeout(reactionPickerTimeout);
+																									setReactionPickerTimeout(null);
+																								}
+																							}}
+																							onMouseLeave={() => {
+																								const timeout = setTimeout(() => {
+																									setOpenReactionPicker(null);
+																								}, 200);
+																								setReactionPickerTimeout(timeout);
+																							}}
+																						>
+																							{(['LIKE', 'TYM', 'HAHA', 'SAD', 'ANGRY', 'WOW'] as ReactionType[]).map((type) => (
+																								<button
+																									key={type}
+																									onClick={() => {
+																										handleReact(reply.id, type);
+																										setOpenReactionPicker(null);
+																									}}
+																									className={`p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors ${
+																										userReactions.get(reply.id) === type ? 'bg-zinc-100 dark:bg-zinc-800' : ''
+																									}`}
+																									title={getReactionLabel(type)}
+																								>
+																									<span className="text-lg">{getReactionEmoji(type)}</span>
+																								</button>
+																							))}
+																						</div>
+																					)}
+																				</div>
+																				{reactionCounts.get(reply.id) && (
+																					<div className="flex items-center gap-1 text-[10px] text-zinc-500">
+																						{reactionCounts.get(reply.id)!.likeCount > 0 && (
+																							<span>❤️ {reactionCounts.get(reply.id)!.likeCount}</span>
+																						)}
+																						{reactionCounts.get(reply.id)!.tymCount > 0 && (
+																							<span>💛 {reactionCounts.get(reply.id)!.tymCount}</span>
+																						)}
+																						{reactionCounts.get(reply.id)!.hahaCount > 0 && (
+																							<span>😂 {reactionCounts.get(reply.id)!.hahaCount}</span>
+																						)}
+																						{reactionCounts.get(reply.id)!.sadCount > 0 && (
+																							<span>😢 {reactionCounts.get(reply.id)!.sadCount}</span>
+																						)}
+																						{reactionCounts.get(reply.id)!.angryCount > 0 && (
+																							<span>😠 {reactionCounts.get(reply.id)!.angryCount}</span>
+																						)}
+																						{reactionCounts.get(reply.id)!.wowCount > 0 && (
+																							<span>😮 {reactionCounts.get(reply.id)!.wowCount}</span>
+																						)}
+																					</div>
+																				)}
+																			</div>
+																		) : (
+																			reactionCounts.get(reply.id) && (
+																				<div className="flex items-center gap-1 text-[10px] text-zinc-500">
+																					{reactionCounts.get(reply.id)!.likeCount > 0 && (
+																						<span>❤️ {reactionCounts.get(reply.id)!.likeCount}</span>
+																					)}
+																					{reactionCounts.get(reply.id)!.tymCount > 0 && (
+																						<span>💛 {reactionCounts.get(reply.id)!.tymCount}</span>
+																					)}
+																					{reactionCounts.get(reply.id)!.hahaCount > 0 && (
+																						<span>😂 {reactionCounts.get(reply.id)!.hahaCount}</span>
+																					)}
+																					{reactionCounts.get(reply.id)!.sadCount > 0 && (
+																						<span>😢 {reactionCounts.get(reply.id)!.sadCount}</span>
+																					)}
+																					{reactionCounts.get(reply.id)!.angryCount > 0 && (
+																						<span>😠 {reactionCounts.get(reply.id)!.angryCount}</span>
+																					)}
+																					{reactionCounts.get(reply.id)!.wowCount > 0 && (
+																						<span>😮 {reactionCounts.get(reply.id)!.wowCount}</span>
+																					)}
+																				</div>
+																			)
+																		)}
 																		{isAuthenticated && (
 																			<button
 																				onClick={() => {
@@ -1787,6 +2324,123 @@ export default function StoryDetailPage() {
 																					<p className="mt-1 whitespace-pre-wrap text-[10px] text-zinc-600 dark:text-zinc-300">
 																						{nestedReply.content}
 																					</p>
+																					<div className="mt-1 flex items-center gap-2">
+																						{isAuthenticated ? (
+																							<div className="flex items-center gap-1">
+																								<div 
+																									className="relative"
+																									onMouseEnter={() => {
+																										if (reactionPickerTimeout) {
+																											clearTimeout(reactionPickerTimeout);
+																											setReactionPickerTimeout(null);
+																										}
+																										setOpenReactionPicker(nestedReply.id);
+																									}}
+																									onMouseLeave={() => {
+																										const timeout = setTimeout(() => {
+																											setOpenReactionPicker(null);
+																										}, 200);
+																										setReactionPickerTimeout(timeout);
+																									}}
+																								>
+																									<button
+																										disabled={likingCommentId === nestedReply.id}
+																										className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+																											userReactions.get(nestedReply.id)
+																												? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+																												: 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+																										} disabled:opacity-50`}
+																									>
+																										{likingCommentId === nestedReply.id ? (
+																											<div className="h-2 w-2 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+																										) : userReactions.get(nestedReply.id) ? (
+																											<span className="text-xs">{getReactionEmoji(userReactions.get(nestedReply.id)!)}</span>
+																										) : (
+																											<span className="text-xs">👍</span>
+																										)}
+																									</button>
+																									{openReactionPicker === nestedReply.id && (
+																										<div 
+																											className="absolute left-0 bottom-full mb-1 flex bg-white dark:bg-zinc-900 rounded-lg shadow-lg border border-zinc-200 dark:border-zinc-700 p-0.5 z-10"
+																											onMouseEnter={() => {
+																												if (reactionPickerTimeout) {
+																													clearTimeout(reactionPickerTimeout);
+																													setReactionPickerTimeout(null);
+																												}
+																											}}
+																											onMouseLeave={() => {
+																												const timeout = setTimeout(() => {
+																													setOpenReactionPicker(null);
+																												}, 200);
+																												setReactionPickerTimeout(timeout);
+																											}}
+																										>
+																											{(['LIKE', 'TYM', 'HAHA', 'SAD', 'ANGRY', 'WOW'] as ReactionType[]).map((type) => (
+																												<button
+																													key={type}
+																													onClick={() => {
+																														handleReact(nestedReply.id, type);
+																														setOpenReactionPicker(null);
+																													}}
+																													className={`p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors ${
+																														userReactions.get(nestedReply.id) === type ? 'bg-zinc-100 dark:bg-zinc-800' : ''
+																													}`}
+																													title={getReactionLabel(type)}
+																												>
+																													<span className="text-sm">{getReactionEmoji(type)}</span>
+																												</button>
+																											))}
+																										</div>
+																									)}
+																								</div>
+																								{reactionCounts.get(nestedReply.id) && (
+																									<div className="flex items-center gap-0.5 text-[9px] text-zinc-500">
+																										{reactionCounts.get(nestedReply.id)!.likeCount > 0 && (
+																											<span>❤️{reactionCounts.get(nestedReply.id)!.likeCount}</span>
+																										)}
+																										{reactionCounts.get(nestedReply.id)!.tymCount > 0 && (
+																											<span>💛{reactionCounts.get(nestedReply.id)!.tymCount}</span>
+																										)}
+																										{reactionCounts.get(nestedReply.id)!.hahaCount > 0 && (
+																											<span>😂{reactionCounts.get(nestedReply.id)!.hahaCount}</span>
+																										)}
+																										{reactionCounts.get(nestedReply.id)!.sadCount > 0 && (
+																											<span>😢{reactionCounts.get(nestedReply.id)!.sadCount}</span>
+																										)}
+																										{reactionCounts.get(nestedReply.id)!.angryCount > 0 && (
+																											<span>😠{reactionCounts.get(nestedReply.id)!.angryCount}</span>
+																										)}
+																										{reactionCounts.get(nestedReply.id)!.wowCount > 0 && (
+																											<span>😮{reactionCounts.get(nestedReply.id)!.wowCount}</span>
+																										)}
+																									</div>
+																								)}
+																							</div>
+																						) : (
+																							reactionCounts.get(nestedReply.id) && (
+																								<div className="flex items-center gap-0.5 text-[9px] text-zinc-500">
+																									{reactionCounts.get(nestedReply.id)!.likeCount > 0 && (
+																										<span>❤️{reactionCounts.get(nestedReply.id)!.likeCount}</span>
+																									)}
+																									{reactionCounts.get(nestedReply.id)!.tymCount > 0 && (
+																										<span>💛{reactionCounts.get(nestedReply.id)!.tymCount}</span>
+																									)}
+																									{reactionCounts.get(nestedReply.id)!.hahaCount > 0 && (
+																										<span>😂{reactionCounts.get(nestedReply.id)!.hahaCount}</span>
+																									)}
+																									{reactionCounts.get(nestedReply.id)!.sadCount > 0 && (
+																										<span>😢{reactionCounts.get(nestedReply.id)!.sadCount}</span>
+																									)}
+																									{reactionCounts.get(nestedReply.id)!.angryCount > 0 && (
+																										<span>😠{reactionCounts.get(nestedReply.id)!.angryCount}</span>
+																									)}
+																									{reactionCounts.get(nestedReply.id)!.wowCount > 0 && (
+																										<span>😮{reactionCounts.get(nestedReply.id)!.wowCount}</span>
+																									)}
+																								</div>
+																							)
+																						)}
+																					</div>
 																				</div>
 																			))
 																		)}
